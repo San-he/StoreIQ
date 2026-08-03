@@ -1,0 +1,48 @@
+// Layout 相关 — CSS 变量覆盖，增加透明度磨砂感
+
+.dark-blue {
+  // 侧边栏背景 → 半透明
+  --v3-sidebar-menu-bg-color: rgba(10, 30, 60, 0.55);
+  // 顶栏背景 → 半透明
+  --v3-header-bg-color: rgba(10, 30, 60, 0.5);
+  // 主内容背景 → 半透明
+  --v3-body-bg-color: rgba(10, 22, 40, 0.35);
+  // Element Plus 页面背景
+  --el-bg-color-page: rgba(10, 22, 40, 0.35);
+  // Element Plus 容器背景
+  --el-bg-color: rgba(10, 30, 60, 0.45);
+  --el-bg-color-overlay: rgba(20, 40, 70, 0.55);
+  --el-fill-color: rgba(64, 158, 255, 0.08);
+  --el-fill-color-light: rgba(64, 158, 255, 0.05);
+  --el-fill-color-lighter: rgba(64, 158, 255, 0.03);
+  --el-border-color: rgba(64, 158, 255, 0.1);
+  --el-border-color-light: rgba(64, 158, 255, 0.06);
+  --el-border-color-lighter: rgba(64, 158, 255, 0.04);
+  // 盒阴影减弱
+  --el-box-shadow-light: 0 1px 6px rgba(0, 0, 0, 0.12);
+  --el-box-shadow-lighter: 0 1px 4px rgba(0, 0, 0, 0.08);
+}
+
+// 侧边栏磨砂
+.app-wrapper .sidebar-container {
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  background-color: var(--v3-sidebar-menu-bg-color);
+}
+
+// 顶栏磨砂
+.layout-header {
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+
+// 内容区磨砂
+.app-main {
+  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
+}
+
+// 右侧设置面板
+.handle-button {
+  background-color: rgba(64, 158, 255, 0.25) !important;
+}

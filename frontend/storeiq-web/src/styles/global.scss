@@ -1,0 +1,107 @@
+// ========================================
+// StoreIQ 全局样式
+// 统一表格、弹窗、表单风格
+// ========================================
+
+// ----- 表格统一风格 -----
+.app-container {
+  padding: 20px;
+
+  .search-wrapper {
+    margin-bottom: 16px;
+    :deep(.el-card__body) {
+      padding-bottom: 2px;
+    }
+  }
+
+  .toolbar-wrapper {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 16px;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .table-wrapper {
+    margin-bottom: 16px;
+  }
+
+  .pager-wrapper {
+    display: flex;
+    justify-content: flex-end;
+  }
+}
+
+// ----- el-table 统一风格 -----
+.el-table {
+  --el-table-header-bg-color: var(--el-fill-color-light);
+  --el-table-row-hover-bg-color: var(--el-color-primary-light-9);
+
+  th.el-table__cell {
+    font-weight: 600;
+    color: var(--el-text-color-primary);
+  }
+}
+
+// ----- el-dialog 统一风格 -----
+.el-dialog {
+  --el-dialog-border-radius: 8px;
+
+  .el-dialog__header {
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--el-border-color-light);
+    margin-right: 0;
+  }
+
+  .el-dialog__body {
+    padding: 20px;
+  }
+
+  .el-dialog__footer {
+    padding: 12px 20px;
+    border-top: 1px solid var(--el-border-color-light);
+  }
+}
+
+// ----- el-form 统一风格 -----
+.el-form {
+  .el-form-item:last-child {
+    margin-bottom: 0;
+  }
+
+  // 表单内联搜索项
+  &.search-form {
+    .el-form-item {
+      margin-bottom: 16px;
+    }
+  }
+}
+
+// ----- 状态标签 -----
+.status-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 10px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+// ----- 数字格式化 -----
+.number-cell {
+  font-variant-numeric: tabular-nums;
+  font-family: 'SF Mono', 'Menlo', 'Monaco', 'Consolas', monospace;
+}
+
+// ----- 卡片间距 -----
+.storeiq-card {
+  margin-bottom: 16px;
+}
+
+// ----- 操作按钮组 -----
+.action-buttons {
+  display: flex;
+  gap: 4px;
+  justify-content: center;
+}
