@@ -21,6 +21,9 @@ public class Inventory implements Serializable {
     private Long productId;
     private Integer quantity;
 
+    /** 0=暂停售卖, 1=在售 */
+    private Integer status;
+
     @TableField(fill = FieldFill.INSERT_UPDATE)
     private LocalDateTime updateTime;
 }

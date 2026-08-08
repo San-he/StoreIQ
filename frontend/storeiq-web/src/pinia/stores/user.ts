@@ -6,18 +6,20 @@ import { useSettingsStore } from "./settings"
 import { useTagsViewStore } from "./tags-view"
 
 export const useUserStore = defineStore("user", () => {
+  // 用户 Token
+  // 用于在请求头中传递身份验证信息
   const token = ref<string>(getToken() || "")
-
+  // 用户角色
   const roles = ref<string[]>([])
-
+  // 用户权限
   const permissions = ref<string[]>([])
-
+  // 用户名
   const username = ref<string>("")
-
+  // 是否已获取用户详情
   const isGotUserInfo = ref<boolean>(false)
-
+  // 标签页管理 store
   const tagsViewStore = useTagsViewStore()
-
+  // 设置 store
   const settingsStore = useSettingsStore()
 
   // 设置 Token
@@ -30,7 +32,7 @@ export const useUserStore = defineStore("user", () => {
   const getInfo = async () => {
     const { data } = await getCurrentUserApi()
     username.value = data.username
-    roles.value = data.role ? [data.role] : []
+    roles.value = data.roles ? data.roles : []
     permissions.value = data.permissions ?? []
     // 防止路由守卫逻辑进入无限循环
     isGotUserInfo.value = true

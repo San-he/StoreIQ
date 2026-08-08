@@ -8,6 +8,7 @@ import { useUserStore } from "@/pinia/stores/user"
 import { routerConfig } from "@/router/config"
 import { isWhiteList } from "@/router/whitelist"
 
+// 不显示加载圈，只显示进度条
 NProgress.configure({ showSpinner: false })
 
 const { setTitle } = useTitle()
@@ -28,7 +29,7 @@ export function registerNavigationGuard(router: Router) {
       return `${LOGIN_PATH}?redirect=${encodeURIComponent(to.fullPath)}`
     }
     // 如果已经登录，并准备进入 Login 页面，则重定向到主页
-    if (to.path === LOGIN_PATH) return "/"
+    if (to.path === LOGIN_PATH) return "/map"
     // 如果用户已经获得其权限信息
     if (userStore.isGotUserInfo) return true
     // 否则要重新获取权限信息

@@ -38,7 +38,22 @@ export function getStoreRegionsApi() {
   return request({ url: "/stores/regions", method: "get" })
 }
 
-/** 某店铺库存明细 */
+/** 某店铺库存明细（含商品详情 + 在售状态） */
 export function getStoreInventoryApi(id) {
   return request({ url: `/stores/${id}/inventory`, method: "get" })
+}
+
+/** 为店铺添加商品 */
+export function addStoreInventoryApi(id, data) {
+  return request({ url: `/stores/${id}/inventory`, method: "post", data })
+}
+
+/** 销售趋势（按月聚合） */
+export function getStoreSalesTrendApi(id, year) {
+  return request({ url: `/stores/${id}/sales-trend`, method: "get", params: { year } })
+}
+
+/** 库存商品最早/最晚进货日期 */
+export function getStoreInventoryPurchaseDatesApi(id) {
+  return request({ url: `/stores/${id}/inventory/purchase-dates`, method: "get" })
 }

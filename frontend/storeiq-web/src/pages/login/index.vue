@@ -52,7 +52,7 @@ function handleLogin() {
     loading.value = true
     loginApi(loginFormData).then(({ data }) => {
       userStore.setToken(data.token)
-      router.push(route.query.redirect ? decodeURIComponent(route.query.redirect as string) : "/")
+      router.push(route.query.redirect ? decodeURIComponent(route.query.redirect as string) : "/map")
     }).catch(() => {
       loginFormData.password = ""
     }).finally(() => {
@@ -68,7 +68,8 @@ function handleLogin() {
     <Owl :close-eyes="isFocus" />
     <div class="login-card">
       <div class="title">
-        <img src="@@/assets/images/layouts/logo-text-2.png">
+        <span>StoreIQ</span>
+        <span>数码智能管理系统</span>
       </div>
       <div class="content">
         <el-form ref="loginFormRef" :model="loginFormData" :rules="loginFormRules" @keyup.enter="handleLogin">
@@ -124,16 +125,36 @@ function handleLogin() {
     width: 480px;
     max-width: 90%;
     border-radius: 20px;
-    box-shadow: 0 0 10px #dcdfe6;
+    box-shadow: 0 0 4px #2666fc;
     background-color: var(--el-bg-color);
     overflow: hidden;
     .title {
       display: flex;
+      flex-direction: column;
       justify-content: center;
       align-items: center;
       height: 150px;
-      img {
-        height: 100%;
+      gap: 8px;
+      user-select: none;
+      // 主标题
+      span:first-child {
+        font-size: 40px;
+        font-weight: 800;
+        letter-spacing: 6px;
+        background: linear-gradient(135deg, #667eea 0%, #409eff 100%);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+        text-shadow: none;
+        filter: drop-shadow(0 2px 4px rgba(64, 158, 255, 0.3));
+      }
+      // 副标题
+      span:last-child {
+        font-size: 16px;
+        font-weight: 300;
+        letter-spacing: 8px;
+        color: var(--el-text-color-secondary);
+        text-transform: uppercase;
       }
     }
     .content {

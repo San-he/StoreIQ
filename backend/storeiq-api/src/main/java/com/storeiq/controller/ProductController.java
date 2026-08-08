@@ -9,14 +9,14 @@ import com.storeiq.common.Result;
 import com.storeiq.entity.Product;
 import com.storeiq.entity.ProductCategory;
 import com.storeiq.mapper.CategoryMapper;
+import com.storeiq.mapper.InventoryMapper;
 import com.storeiq.mapper.ProductMapper;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDateTime;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
+import java.util.stream.Collectors;
 
 /**
  * 商品管理控制器
@@ -31,6 +31,9 @@ public class ProductController {
     @Autowired
     private CategoryMapper categoryMapper;
 
+    @Autowired
+    private InventoryMapper inventoryMapper;
+
     /** 分页列表 */
     @PostMapping("/list")
     public Result<?> list(@RequestBody QueryPageParam query) {
@@ -40,18 +43,42 @@ public class ProductController {
 
         if (param != null) {
             String name = (String) param.get("name");
-            String categoryId = (String) param.get("categoryId");
+            Object categoryId = param.get("categoryId");
             String brand = (String) param.get("brand");
+            Object costPriceMin = param.get("costPriceMin");
+            Object costPriceMax = param.get("costPriceMax");
+            Object salePriceMin = param.get("salePriceMin");
+            Object salePriceMax = param.get("salePriceMax");
+            Object statusObj = param.get("status");
 
             if (StringUtils.isNotBlank(name)) wrapper.like(Product::getName, name);
-            if (StringUtils.isNotBlank(categoryId)) wrapper.eq(Product::getCategoryId, Long.parseLong(categoryId));
+            if (categoryId != null && StringUtils.isNotBlank(categoryId.toString())) wrapper.eq(Product::getCategoryId, Long.parseLong(categoryId.toString()));
             if (StringUtils.isNotBlank(brand)) wrapper.eq(Product::getBrand, brand);
+            if (costPriceMin != null && StringUtils.isNotBlank(costPriceMin.toString()))
+                wrapper.ge(Product::getCostPrice, new java.math.BigDecimal(costPriceMin.toString()));
+            if (costPriceMax != null && StringUtils.isNotBlank(costPriceMax.toString()))
+                wrapper.le(Product::getCostPrice, new java.math.BigDecimal(costPriceMax.toString()));
+            if (salePriceMin != null && StringUtils.isNotBlank(salePriceMin.toString()))
+                wrapper.ge(Product::getSalePrice, new java.math.BigDecimal(salePriceMin.toString()));
+            if (salePriceMax != null && StringUtils.isNotBlank(salePriceMax.toString()))
+                wrapper.le(Product::getSalePrice, new java.math.BigDecimal(salePriceMax.toString()));
+            if (statusObj != null && StringUtils.isNotBlank(statusObj.toString())) {
+                wrapper.eq(Product::getStatus, Integer.parseInt(statusObj.toString()));
+            } else {
+                wrapper.eq(Product::getStatus, 1);
+            }
+        } else {
+            wrapper.eq(Product::getStatus, 1);
         }
-
-        wrapper.eq(Product::getStatus, 1);
         wrapper.orderByDesc(Product::getCreateTime);
 
         IPage<Product> result = productMapper.selectPage(page, wrapper);
+
+        // 批量查库存总量
+        Set<Long> productIds = result.getRecords().stream().map(Product::getId).collect(Collectors.toSet());
+        Map<Long, Integer> inventoryMap = productIds.isEmpty() ? Collections.emptyMap()
+                : inventoryMapper.sumQuantityByProductIds(productIds).stream()
+                .collect(Collectors.toMap(m -> (Long) m.get("product_id"), m -> ((Number) m.get("total")).intValue(), Integer::sum));
 
         // 加载分类名称
         List<Map<String, Object>> enriched = result.getRecords().stream().map(p -> {
@@ -70,11 +97,12 @@ public class ProductController {
             map.put("description", p.getDescription());
             map.put("status", p.getStatus());
             map.put("createTime", p.getCreateTime());
+            map.put("totalInventory", inventoryMap.getOrDefault(p.getId(), 0));
 
             ProductCategory cat = categoryMapper.selectById(p.getCategoryId());
             map.put("categoryName", cat != null ? cat.getName() : "-");
             return map;
-        }).collect(java.util.stream.Collectors.toList());
+        }).collect(Collectors.toList());
 
         return Result.success(enriched, result.getTotal());
     }

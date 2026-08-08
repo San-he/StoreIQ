@@ -5,7 +5,9 @@
 import { getInventoryListApi, getInventoryAlertsApi } from '@@/apis/storeiq/inventory'
 import { getStoreMapApi } from '@@/apis/storeiq/stores'
 import { getCategoryListApi } from '@@/apis/storeiq/categories'
-import { Search, Refresh, WarningFilled } from '@element-plus/icons-vue'
+import { Search, Refresh, WarningFilled, Download } from '@element-plus/icons-vue'
+import { ElMessage } from 'element-plus'
+import * as XLSX from 'xlsx'
 
 defineOptions({ name: 'InventoryManagement' })
 
@@ -16,14 +18,14 @@ const storeOptions = ref([])
 const categoryOptions = ref([])
 
 const pagination = reactive({ currentPage: 1, pageSize: 10, total: 0 })
-const searchForm = reactive({ storeId: '', categoryId: '' })
+const searchForm = reactive({ storeId: '', categoryId: '', productName: '', quantityMin: '', quantityMax: '' })
 
 async function loadData() {
   loading.value = true
   try {
     const res = await getInventoryListApi({
       pageNum: pagination.currentPage, pageSize: pagination.pageSize,
-      param: { storeId: searchForm.storeId, categoryId: searchForm.categoryId }
+      param: { storeId: searchForm.storeId, categoryId: searchForm.categoryId, productName: searchForm.productName, quantityMin: searchForm.quantityMin, quantityMax: searchForm.quantityMax }
     })
     tableData.value = res.data
     pagination.total = res.total || 0
@@ -45,9 +47,30 @@ onMounted(async () => {
 })
 
 function handleSearch() { pagination.currentPage = 1; loadData() }
-function handleReset() { searchForm.storeId = ''; searchForm.categoryId = ''; handleSearch() }
+function handleReset() { searchForm.storeId = ''; searchForm.categoryId = ''; searchForm.productName = ''; searchForm.quantityMin = ''; searchForm.quantityMax = ''; handleSearch() }
 function handlePageChange(page) { pagination.currentPage = page; loadData() }
 function handleSizeChange(size) { pagination.pageSize = size; pagination.currentPage = 1; loadData() }
+
+function quantityClass(row) {
+  const threshold = row.safetyStock || 10
+  if (row.quantity <= 0) return 'qty-danger'
+  if (row.quantity <= threshold) return 'qty-warning'
+  return 'qty-normal'
+}
+
+function handleExport() {
+  if (tableData.value.length === 0) { ElMessage.warning('没有可导出的数据'); return }
+  const exportData = tableData.value.map(row => ({
+    '店铺': row.storeName, '商品名称': row.productName, 'SKU': row.productCode,
+    '品牌': row.brand, '库存数量': row.quantity, '安全库存': row.safetyStock,
+    '售价': row.salePrice, '更新时间': row.updateTime?.substring(0, 19)
+  }))
+  const ws = XLSX.utils.json_to_sheet(exportData)
+  const wb = XLSX.utils.book_new()
+  XLSX.utils.book_append_sheet(wb, ws, '库存总览')
+  XLSX.writeFile(wb, `StoreIQ_库存总览_${new Date().toISOString().slice(0, 10)}.xlsx`)
+  ElMessage.success('导出成功')
+}
 </script>
 
 <template>
@@ -63,7 +86,9 @@ function handleSizeChange(size) { pagination.pageSize = size; pagination.current
       </template>
     </el-alert>
 
-    <el-card shadow="never" class="search-wrapper">
+
+
+    <el-card shadow="never">
       <el-form :inline="true" :model="searchForm">
         <el-form-item label="店铺">
           <el-select v-model="searchForm.storeId" placeholder="全部" clearable style="width:180px">
@@ -75,39 +100,44 @@ function handleSizeChange(size) { pagination.pageSize = size; pagination.current
             <el-option v-for="c in categoryOptions" :key="c.id" :label="c.name" :value="c.id" />
           </el-select>
         </el-form-item>
+        <el-form-item label="商品名称">
+          <el-input v-model="searchForm.productName" placeholder="请输入" clearable style="width:140px" @keyup.enter="handleSearch" />
+        </el-form-item>
+        <el-form-item label="库存数量">
+          <el-input v-model="searchForm.quantityMin" placeholder="最低" clearable style="width:90px" @keyup.enter="handleSearch" />
+          <span style="margin:0 4px;color:#909399">—</span>
+          <el-input v-model="searchForm.quantityMax" placeholder="最高" clearable style="width:90px" @keyup.enter="handleSearch" />
+        </el-form-item>
         <el-form-item>
           <el-button type="primary" :icon="Search" @click="handleSearch">搜索</el-button>
           <el-button :icon="Refresh" @click="handleReset">重置</el-button>
         </el-form-item>
       </el-form>
-    </el-card>
 
-    <el-card shadow="never">
       <div class="toolbar-wrapper">
         <span style="color:#909399;font-size:13px">库存总览（只读）</span>
-        <el-tooltip content="刷新"><el-button :icon="Refresh" circle @click="loadData" /></el-tooltip>
+        <div>
+          <el-button :icon="Download" @click="handleExport">导出</el-button>
+          <el-tooltip content="刷新"><el-button :icon="Refresh" circle @click="loadData" /></el-tooltip>
+        </div>
       </div>
-      <el-table v-loading="loading" :data="tableData" stripe border
-        :row-class-name="({ row }) => row.quantity <= (row.safetyStock || 10) ? 'warning-row' : ''">
-        <el-table-column prop="storeName" label="店铺" width="130" show-overflow-tooltip />
-        <el-table-column prop="productName" label="商品" min-width="160" show-overflow-tooltip />
-        <el-table-column prop="productCode" label="SKU" width="120" />
-        <el-table-column prop="brand" label="品牌" width="80" />
-        <el-table-column label="库存数量" width="130" align="center">
+      <el-table v-loading="loading" :data="tableData" stripe>
+        <el-table-column prop="storeName" label="店铺" min-width="100" show-overflow-tooltip />
+        <el-table-column prop="productName" label="商品" min-width="130" show-overflow-tooltip />
+        <el-table-column prop="productCode" label="SKU"  show-overflow-tooltip />
+        <el-table-column prop="brand" label="品牌"  show-overflow-tooltip />
+        <el-table-column label="库存数量" align="center">
           <template #default="{ row }">
-            <span :style="{ color: row.quantity <= (row.safetyStock || 10) ? '#f56c6c' : '', fontWeight: row.quantity <= (row.safetyStock || 10) ? '700' : '' }">
-              {{ row.quantity }}
-            </span>
-            <el-tag v-if="row.quantity <= (row.safetyStock || 10)" type="danger" size="small" effect="dark" style="margin-left:6px">
-              {{ row.quantity <= 0 ? '缺货' : '预警' }}
-            </el-tag>
+            <span :class="quantityClass(row)">{{ row.quantity }}</span>
+            <el-tag v-if="row.quantity <= 0" type="danger" size="small" effect="dark" style="margin-left:4px">缺货</el-tag>
+            <el-tag v-else-if="row.quantity <= (row.safetyStock || 10)" type="warning" size="small" effect="dark" style="margin-left:4px">预警</el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="safetyStock" label="安全库存" width="80" align="center" />
-        <el-table-column label="售价" width="100" align="right">
+        <el-table-column prop="safetyStock" label="安全库存"  />
+        <el-table-column label="售价" >
           <template #default="{ row }">¥{{ row.salePrice }}</template>
         </el-table-column>
-        <el-table-column label="更新时间" width="160">
+        <el-table-column label="更新时间">
           <template #default="{ row }">{{ row.updateTime?.substring(0,16) }}</template>
         </el-table-column>
       </el-table>
@@ -121,9 +151,13 @@ function handleSizeChange(size) { pagination.pageSize = size; pagination.current
 </template>
 
 <style lang="scss" scoped>
-.app-container { padding: 16px; }
+.app-container { 
+  padding: 16px; 
+}
 .search-wrapper { margin-bottom: 16px; :deep(.el-card__body) { padding-bottom: 2px; } }
 .toolbar-wrapper { display: flex; justify-content: space-between; margin-bottom: 16px; align-items: center; }
 .pager-wrapper { display: flex; justify-content: flex-end; margin-top: 16px; }
-:deep(.warning-row) { --el-table-tr-bg-color: var(--el-color-danger-light-9); }
+.qty-normal { color: #67c23a; font-weight: 600; }
+.qty-warning { color: #e6a23c; font-weight: 700; }
+.qty-danger { color: #f56c6c; font-weight: 700; }
 </style>

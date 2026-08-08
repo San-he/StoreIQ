@@ -4,8 +4,10 @@
  */
 import { getStoreListApi, createStoreApi, updateStoreApi, deleteStoreApi, getStoreRegionsApi } from '@@/apis/storeiq/stores'
 import { useRouter } from 'vue-router'
-import { Search, Refresh, CirclePlus, Delete, Edit, View } from '@element-plus/icons-vue'
+import { Search, Refresh, CirclePlus, Delete, Edit, View, Download } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import * as XLSX from 'xlsx'
+import { PROPERTY_TYPE, STORE_STATUS, getDictLabel, getDictTag } from '@@/constants/dict'
 
 defineOptions({ name: 'StoreManagement' })
 const router = useRouter()
@@ -19,6 +21,7 @@ const dialogTitle = ref('新增店铺')
 const isEdit = ref(false)
 const formRef = ref(null)
 const regionOptions = ref([])
+const originalFormData = ref('')
 
 // 分页
 const pagination = reactive({
@@ -28,7 +31,7 @@ const pagination = reactive({
 })
 
 // 搜索
-const searchForm = reactive({ name: '', region: '' })
+const searchForm = reactive({ name: '', region: '', propertyType: '', status: '' })
 
 // 表单
 const defaultForm = () => ({
@@ -54,7 +57,7 @@ async function loadData() {
     const res = await getStoreListApi({
       pageNum: pagination.currentPage,
       pageSize: pagination.pageSize,
-      param: { name: searchForm.name, region: searchForm.region }
+      param: { name: searchForm.name, region: searchForm.region, propertyType: searchForm.propertyType, status: searchForm.status }
     })
     tableData.value = res.data
     pagination.total = res.total || 0
@@ -73,13 +76,14 @@ onMounted(() => { loadRegions(); loadData() })
 
 // ===== 搜索 =====
 function handleSearch() { pagination.currentPage = 1; loadData() }
-function handleReset() { searchForm.name = ''; searchForm.region = ''; handleSearch() }
+function handleReset() { searchForm.name = ''; searchForm.region = ''; searchForm.propertyType = ''; searchForm.status = ''; handleSearch() }
 
 // ===== 新增/编辑 =====
 function handleCreate() {
   isEdit.value = false
   dialogTitle.value = '新增店铺'
   Object.assign(formData, defaultForm())
+  originalFormData.value = JSON.stringify(formData)
   dialogVisible.value = true
 }
 
@@ -87,6 +91,7 @@ function handleEdit(row) {
   isEdit.value = true
   dialogTitle.value = '编辑店铺'
   Object.assign(formData, { ...row })
+  originalFormData.value = JSON.stringify(formData)
   dialogVisible.value = true
 }
 
@@ -116,8 +121,55 @@ async function handleSubmit() {
   } finally { loading.value = false }
 }
 
+function hasFormChanged() {
+  return JSON.stringify(formData) !== originalFormData.value
+}
+
+async function handleBeforeClose(done) {
+  if (hasFormChanged()) {
+    try {
+      await ElMessageBox.confirm('表单已修改，确定放弃更改吗？', '提示', {
+        confirmButtonText: '确定', cancelButtonText: '取消', type: 'warning'
+      })
+    } catch {
+      return
+    }
+  }
+  done()
+}
+
+async function handleCancelClick() {
+  if (hasFormChanged()) {
+    try {
+      await ElMessageBox.confirm('表单已修改，确定放弃更改吗？', '提示', {
+        confirmButtonText: '确定', cancelButtonText: '取消', type: 'warning'
+      })
+    } catch {
+      return
+    }
+  }
+  dialogVisible.value = false
+}
+
 function handleDialogClose() {
   formRef.value?.resetFields()
+}
+
+// ===== 导出 =====
+function handleExport() {
+  if (tableData.value.length === 0) { ElMessage.warning('没有可导出的数据'); return }
+  const exportData = tableData.value.map(row => ({
+    '店铺名称': row.name, '编码': row.code, '区域': row.region,
+    '产权': getDictLabel(PROPERTY_TYPE, row.propertyType),
+    '容量': row.capacity, '已用': row.used, '使用率': row.usageRate + '%',
+    '联系人': row.contactPerson, '电话': row.contactPhone,
+    '状态': getDictLabel(STORE_STATUS, row.status)
+  }))
+  const ws = XLSX.utils.json_to_sheet(exportData)
+  const wb = XLSX.utils.book_new()
+  XLSX.utils.book_append_sheet(wb, ws, '店铺列表')
+  XLSX.writeFile(wb, `StoreIQ_店铺列表_${new Date().toISOString().slice(0, 10)}.xlsx`)
+  ElMessage.success('导出成功')
 }
 
 // ===== 分页 =====
@@ -127,64 +179,73 @@ function handleSizeChange(size) { pagination.pageSize = size; pagination.current
 
 <template>
   <div class="app-container">
-    <!-- 搜索栏 -->
-    <el-card shadow="never" class="search-wrapper">
-      <el-form :inline="true" :model="searchForm">
+    <!-- 表格 -->
+    <el-card shadow="never">
+      <div class="toolbar-wrapper">
+     <el-form :inline="true" :model="searchForm">
         <el-form-item label="店铺名称">
           <el-input v-model="searchForm.name" placeholder="请输入" clearable @keyup.enter="handleSearch" />
         </el-form-item>
         <el-form-item label="区域">
-          <el-select v-model="searchForm.region" placeholder="全部" clearable>
+          <el-select v-model="searchForm.region" placeholder="全部" clearable style="width:160px;">
             <el-option v-for="r in regionOptions" :key="r" :label="r" :value="r" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="产权">
+          <el-select v-model="searchForm.propertyType" placeholder="全部" clearable style="width:160px;">
+            <el-option v-for="(item, key) in PROPERTY_TYPE" :key="key" :label="item.label" :value="key" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="状态">
+          <el-select v-model="searchForm.status" placeholder="全部" clearable style="width:160px;">
+            <el-option v-for="(item, key) in STORE_STATUS" :key="key" :label="item.label" :value="key" />
           </el-select>
         </el-form-item>
         <el-form-item>
           <el-button type="primary" :icon="Search" @click="handleSearch">搜索</el-button>
           <el-button :icon="Refresh" @click="handleReset">重置</el-button>
         </el-form-item>
-      </el-form>
-    </el-card>
-
-    <!-- 表格 -->
-    <el-card shadow="never">
-      <div class="toolbar-wrapper">
+        <el-form-item>
         <el-button type="primary" :icon="CirclePlus" @click="handleCreate">新增店铺</el-button>
+        <el-button :icon="Download" @click="handleExport">导出</el-button>
         <el-tooltip content="刷新">
           <el-button :icon="Refresh" circle @click="loadData" />
         </el-tooltip>
+        </el-form-item>
+      </el-form>
       </div>
-      <el-table v-loading="loading" :data="tableData" stripe border style="width:100%">
-        <el-table-column prop="name" label="店铺名称" min-width="140" show-overflow-tooltip />
-        <el-table-column prop="code" label="编码" width="100" />
-        <el-table-column prop="region" label="区域" width="70" align="center" />
-        <el-table-column label="产权" width="70" align="center">
+      <el-table v-loading="loading" :data="tableData" stripe style="width:100%">
+        <el-table-column prop="name" label="店铺名称" align="center" show-overflow-tooltip />
+        <el-table-column prop="code" label="编码" align="center" />
+        <el-table-column prop="region" label="区域" align="center" show-overflow-tooltip />
+        <el-table-column label="产权"  align="center">
           <template #default="{ row }">
-            <el-tag :type="row.propertyType === 'owned' ? 'success' : 'warning'" size="small" effect="plain">
-              {{ row.propertyType === 'owned' ? '自有' : '租赁' }}
+            <el-tag :type="getDictTag(PROPERTY_TYPE, row.propertyType)" size="small" effect="plain">
+              {{ getDictLabel(PROPERTY_TYPE, row.propertyType) }}
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="容量使用" width="150">
+        <el-table-column label="容量使用" align="center">
           <template #default="{ row }">
-            <el-progress :percentage="row.usageRate" :stroke-width="8"
+            <el-progress :percentage="row.usageRate" :stroke-width="8" :show-text="false"
               :status="row.usageRate > 85 ? 'exception' : row.usageRate > 60 ? 'warning' : 'success'" />
             <span style="font-size:12px;color:#909399">{{ row.used }}/{{ row.capacity }}</span>
           </template>
         </el-table-column>
-        <el-table-column prop="contactPerson" label="联系人" width="90" />
-        <el-table-column prop="contactPhone" label="电话" width="120" />
-        <el-table-column label="状态" width="70" align="center">
+        <el-table-column prop="contactPerson" label="联系人" align="center" show-overflow-tooltip/>
+        <el-table-column prop="contactPhone" label="电话" align="center" />
+        <el-table-column label="状态" align="center">
           <template #default="{ row }">
-            <el-tag :type="row.status === 1 ? 'success' : 'info'" size="small" effect="plain">
-              {{ row.status === 1 ? '运营中' : '已停用' }}
+            <el-tag :type="getDictTag(STORE_STATUS, row.status)" size="small" effect="plain" >
+              {{ getDictLabel(STORE_STATUS, row.status) }}
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="200" fixed="right" align="center">
+        <el-table-column label="操作" width="150" fixed="right" align="center">
           <template #default="{ row }">
-            <el-button type="info" link :icon="View" @click="handleDetail(row)">详情</el-button>
-            <el-button type="primary" link :icon="Edit" @click="handleEdit(row)">编辑</el-button>
-            <el-button type="danger" link :icon="Delete" @click="handleDelete(row)">删除</el-button>
+            <el-button type="info" link :icon="View" @click="handleDetail(row)" title="详情"></el-button>
+            <el-button type="primary" link :icon="Edit" @click="handleEdit(row)" title="编辑"></el-button>
+            <el-button type="danger" link :icon="Delete" @click="handleDelete(row)" title="删除"></el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -203,7 +264,14 @@ function handleSizeChange(size) { pagination.pageSize = size; pagination.current
     </el-card>
 
     <!-- 新增/编辑弹窗 -->
-    <el-dialog v-model="dialogVisible" :title="dialogTitle" width="600px" @closed="handleDialogClose">
+    <el-dialog
+    v-model="dialogVisible"
+    :title="dialogTitle"
+    width="40%"
+    append-to-body="body"
+    :before-close="handleBeforeClose"
+    @closed="handleDialogClose"
+    >
       <el-form ref="formRef" :model="formData" :rules="formRules" label-width="100px">
         <el-row :gutter="16">
           <el-col :span="12">
@@ -277,7 +345,7 @@ function handleSizeChange(size) { pagination.pageSize = size; pagination.current
         </el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="dialogVisible = false">取消</el-button>
+        <el-button @click="handleCancelClick">取消</el-button>
         <el-button type="primary" :loading="loading" @click="handleSubmit">确定</el-button>
       </template>
     </el-dialog>
@@ -285,7 +353,9 @@ function handleSizeChange(size) { pagination.pageSize = size; pagination.current
 </template>
 
 <style lang="scss" scoped>
-.app-container { padding: 16px; }
+.app-container { 
+  padding: 16px; 
+}
 .search-wrapper { margin-bottom: 16px; :deep(.el-card__body) { padding-bottom: 2px; } }
 .toolbar-wrapper { display: flex; justify-content: space-between; margin-bottom: 16px; align-items: center; }
 .pager-wrapper { display: flex; justify-content: flex-end; margin-top: 16px; }

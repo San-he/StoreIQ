@@ -231,4 +231,95 @@ public class StatsController {
         resp.put("data", result);
         return Result.success(resp);
     }
+
+    /** 商品销售统计（按店铺/时间/分类筛选，含趋势） */
+    @GetMapping("/product-sales")
+    public Result<?> productSales(
+            @RequestParam(required = false) Long storeId,
+            @RequestParam(required = false) String startDate,
+            @RequestParam(required = false) String endDate,
+            @RequestParam(required = false) Long categoryId,
+            @RequestParam(defaultValue = "1") int pageNum,
+            @RequestParam(defaultValue = "10") int pageSize) {
+
+        // SQL 按商品聚合（避免全量加载 4k+ 条销售记录到内存）
+        List<Map<String, Object>> aggRows = saleMapper.sumAmountByProduct(storeId);
+        Set<Long> filteredProductIds = null;
+        if (categoryId != null) {
+            filteredProductIds = productMapper.selectList(
+                    new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<Product>()
+                            .eq(Product::getCategoryId, categoryId))
+                    .stream().map(Product::getId).collect(Collectors.toSet());
+        }
+
+        // 计算上一时段趋势
+        java.time.LocalDateTime now = java.time.LocalDateTime.now();
+        java.time.LocalDate today = java.time.LocalDate.now();
+        java.time.LocalDate monthStart = today.withDayOfMonth(1);
+        String prevEnd = monthStart.atStartOfDay().minusSeconds(1).toString().replace("T", " ");
+        String prevStart = prevEnd.substring(0, 7) + "-01 00:00:00";
+        // 修正：上月同区间
+        java.time.LocalDateTime e = monthStart.atStartOfDay().minusSeconds(1);
+        prevStart = e.toLocalDate().minusMonths(1).withDayOfMonth(1).atStartOfDay().toString().replace("T", " ");
+        prevEnd = e.toString().replace("T", " ");
+
+        Map<Long, BigDecimal> prevAmountMap = saleMapper
+                .sumAmountByProductAndDate(storeId, prevStart, prevEnd)
+                .stream().collect(Collectors.toMap(
+                        m -> (Long) m.get("product_id"),
+                        m -> (BigDecimal) m.get("amount"),
+                        BigDecimal::add));
+
+        // 组装结果
+        List<Map<String, Object>> result = new ArrayList<>();
+        for (Map<String, Object> row : aggRows) {
+            Long pid = (Long) row.get("product_id");
+            if (categoryId != null && !filteredProductIds.contains(pid)) continue;
+
+            Product p = productMapper.selectById(pid);
+            if (p == null) continue;
+
+            int totalQuantity = ((Number) row.get("qty")).intValue();
+            BigDecimal totalAmount = (BigDecimal) row.get("amount");
+
+            BigDecimal prevAmount = prevAmountMap.getOrDefault(pid, BigDecimal.ZERO);
+            String trend;
+            if (prevAmount.compareTo(BigDecimal.ZERO) == 0) {
+                trend = totalAmount.compareTo(BigDecimal.ZERO) > 0 ? "up" : "stable";
+            } else if (totalAmount.compareTo(prevAmount) > 0) {
+                trend = "up";
+            } else if (totalAmount.compareTo(prevAmount) < 0) {
+                trend = "down";
+            } else {
+                trend = "stable";
+            }
+
+            Map<String, Object> item = new HashMap<>();
+            item.put("productId", pid);
+            item.put("productName", p.getName());
+            item.put("productCode", p.getCode());
+            item.put("totalQuantity", totalQuantity);
+            item.put("totalAmount", totalAmount);
+            item.put("trend", trend);
+            item.put("costPrice", p.getCostPrice());
+            item.put("salePrice", p.getSalePrice());
+            item.put("categoryId", p.getCategoryId());
+
+            ProductCategory cat = categoryMapper.selectById(p.getCategoryId());
+            item.put("categoryName", cat != null ? cat.getName() : "-");
+
+            result.add(item);
+        }
+
+        // 按销售额降序
+        result.sort((a, b) -> ((BigDecimal) b.get("totalAmount")).compareTo((BigDecimal) a.get("totalAmount")));
+
+        // 分页
+        long total = result.size();
+        int from = (pageNum - 1) * pageSize;
+        int to = Math.min(from + pageSize, result.size());
+        List<Map<String, Object>> paged = from < total ? result.subList(from, to) : new ArrayList<>();
+
+        return Result.success(paged, total);
+    }
 }

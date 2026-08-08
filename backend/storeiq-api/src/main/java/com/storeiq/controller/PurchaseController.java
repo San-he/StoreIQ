@@ -14,6 +14,8 @@ import com.storeiq.mapper.InventoryMapper;
 import com.storeiq.mapper.ProductMapper;
 import com.storeiq.mapper.PurchaseRecordMapper;
 import com.storeiq.mapper.StoreMapper;
+import com.storeiq.mapper.SupplierMapper;
+import com.storeiq.mapper.UserMapper;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
@@ -46,6 +48,12 @@ public class PurchaseController {
 
     @Autowired
     private InventoryMapper inventoryMapper;
+
+    @Autowired
+    private SupplierMapper supplierMapper;
+
+    @Autowired
+    private UserMapper userMapper;
 
     /** 分页列表 */
     @PostMapping("/list")
@@ -83,6 +91,12 @@ public class PurchaseController {
 
             com.storeiq.entity.Store s = storeMapper.selectById(r.getStoreId());
             map.put("storeName", s != null ? s.getName() : "-");
+
+            com.storeiq.entity.Supplier sup = supplierMapper.selectById(r.getSupplierId());
+            map.put("supplierName", sup != null ? sup.getName() : "-");
+
+            com.storeiq.entity.User operator = userMapper.selectById(r.getOperatorId());
+            map.put("operatorName", operator != null ? operator.getNickname() : "-");
             return map;
         }).collect(Collectors.toList());
 

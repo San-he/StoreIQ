@@ -2,25 +2,24 @@
 
 .dark-blue {
   // 侧边栏背景 → 半透明
-  --v3-sidebar-menu-bg-color: rgba(10, 30, 60, 0.55);
+  --v3-sidebar-menu-bg-color: rgba(5, 13, 52, 0.45);
   // 顶栏背景 → 半透明
-  --v3-header-bg-color: rgba(10, 30, 60, 0.5);
+  --v3-header-bg-color: rgba(5, 13, 52, 0.45);
   // 主内容背景 → 半透明
-  --v3-body-bg-color: rgba(10, 22, 40, 0.35);
+  --v3-body-bg-color: rgb(7, 19, 43);
+  // 侧边栏悬停背景 → 半透明
+  --v3-sidebar-menu-hover-bg-color: rgba(12, 36, 72, 0.75);
   // Element Plus 页面背景
-  --el-bg-color-page: rgba(10, 22, 40, 0.35);
+  --el-bg-color-page: rgba(5, 20, 43, 0.75);
   // Element Plus 容器背景
-  --el-bg-color: rgba(10, 30, 60, 0.45);
-  --el-bg-color-overlay: rgba(20, 40, 70, 0.55);
-  --el-fill-color: rgba(64, 158, 255, 0.08);
-  --el-fill-color-light: rgba(64, 158, 255, 0.05);
-  --el-fill-color-lighter: rgba(64, 158, 255, 0.03);
-  --el-border-color: rgba(64, 158, 255, 0.1);
-  --el-border-color-light: rgba(64, 158, 255, 0.06);
-  --el-border-color-lighter: rgba(64, 158, 255, 0.04);
-  // 盒阴影减弱
-  --el-box-shadow-light: 0 1px 6px rgba(0, 0, 0, 0.12);
-  --el-box-shadow-lighter: 0 1px 4px rgba(0, 0, 0, 0.08);
+  --el-bg-color: rgba(9, 19, 70, 0.25);
+  --el-bg-color-overlay: rgba(8, 28, 60, 0.25);
+  --el-fill-color: rgba(1, 43, 107, 0.25);
+  --el-fill-color-light: rgba(20, 61, 123, 0.25);
+  --el-fill-color-lighter: rgba(6, 26, 57, 0.25);
+  --el-border-color: rgba(71, 166, 254, 0.1);
+  --el-border-color-light: rgba(67, 156, 244, 0.06);
+  --el-border-color-lighter: rgba(71, 166, 254, 0.04)
 }
 
 // 侧边栏磨砂
@@ -44,5 +43,13 @@
 
 // 右侧设置面板
 .handle-button {
-  background-color: rgba(64, 158, 255, 0.25) !important;
+  background-color: rgba(6, 26, 57, 0.25) !important;
+}
+
+// ===== 深蓝模式：背景图 + 透出效果 =====
+html.dark-blue body {
+  background-image: url("/UI/menergebg.jpg");
+  background-size: cover;
+  background-position: center;
+  background-attachment: fixed;
 }

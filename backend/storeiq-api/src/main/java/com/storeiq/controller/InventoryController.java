@@ -37,23 +37,31 @@ public class InventoryController {
     public Result<?> list(@RequestBody QueryPageParam query) {
         HashMap<String, Object> param = query.getParam();
 
+        // 提取筛选参数（一次性赋值，保证 effectively final）
+        final String storeIdStr = getString(param, "storeId");
+        final String productName = getString(param, "productName");
+        final String categoryIdStr = getString(param, "categoryId");
+        final Integer quantityMin = getInteger(param, "quantityMin");
+        final Integer quantityMax = getInteger(param, "quantityMax");
+
         LambdaQueryWrapper<Inventory> wrapper = new LambdaQueryWrapper<>();
-        if (param != null) {
-            String storeId = (String) param.get("storeId");
-            String categoryId = (String) param.get("categoryId");
-            if (StringUtils.isNotBlank(storeId)) wrapper.eq(Inventory::getStoreId, Long.parseLong(storeId));
-        }
+        if (StringUtils.isNotBlank(storeIdStr)) wrapper.eq(Inventory::getStoreId, Long.parseLong(storeIdStr));
         wrapper.orderByAsc(Inventory::getStoreId).orderByAsc(Inventory::getProductId);
 
         // 全量加载（库存表通常不大）
         List<Inventory> all = inventoryMapper.selectList(wrapper);
 
-        // 筛选分类
-        if (param != null && StringUtils.isNotBlank((String) param.get("categoryId"))) {
-            Long catId = Long.parseLong((String) param.get("categoryId"));
+        // 分类 / 商品名 / 数量区间 筛选
+        final Long finalCatId = StringUtils.isNotBlank(categoryIdStr) ? Long.parseLong(categoryIdStr) : null;
+        if (finalCatId != null || StringUtils.isNotBlank(productName) || quantityMin != null || quantityMax != null) {
             all = all.stream().filter(inv -> {
                 Product p = productMapper.selectById(inv.getProductId());
-                return p != null && catId.equals(p.getCategoryId());
+                if (p == null) return false;
+                if (finalCatId != null && !finalCatId.equals(p.getCategoryId())) return false;
+                if (StringUtils.isNotBlank(productName) && !p.getName().contains(productName)) return false;
+                if (quantityMin != null && inv.getQuantity() < quantityMin) return false;
+                if (quantityMax != null && inv.getQuantity() > quantityMax) return false;
+                return true;
             }).collect(Collectors.toList());
         }
 
@@ -118,5 +126,33 @@ public class InventoryController {
             }
         }
         return Result.success(alerts);
+    }
+
+    /** 从 param 中安全取字符串 */
+    private String getString(HashMap<String, Object> param, String key) {
+        if (param == null) return null;
+        Object v = param.get(key);
+        return v != null ? v.toString() : null;
+    }
+
+    /** 从 param 中安全取整数 */
+    private Integer getInteger(HashMap<String, Object> param, String key) {
+        if (param == null) return null;
+        Object v = param.get(key);
+        if (v == null || !StringUtils.isNotBlank(v.toString())) return null;
+        return Integer.parseInt(v.toString());
+    }
+
+    /** 切换库存商品在售状态（软删除/恢复） */
+    @PutMapping("/{id}/status")
+    public Result<?> updateStatus(@PathVariable Long id, @RequestBody Map<String, Object> body) {
+        Inventory inv = inventoryMapper.selectById(id);
+        if (inv == null) return Result.fail("库存记录不存在");
+
+        Integer status = body.get("status") != null ? Integer.parseInt(body.get("status").toString()) : 0;
+        inv.setStatus(status);
+        inv.setUpdateTime(java.time.LocalDateTime.now());
+        inventoryMapper.updateById(inv);
+        return Result.success();
     }
 }

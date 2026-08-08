@@ -9,6 +9,7 @@
 
   .search-wrapper {
     margin-bottom: 16px;
+
     :deep(.el-card__body) {
       padding-bottom: 2px;
     }
@@ -66,8 +67,26 @@
 
 // ----- el-form 统一风格 -----
 .el-form {
-  .el-form-item:last-child {
-    margin-bottom: 0;
+
+  // 非 inline 模式：上下排列的表单项之间保持间距
+  &:not(.el-form--inline) {
+    .el-form-item {
+      margin-bottom: 6px;
+    }
+
+    // el-row 行间距（el-row 内部 flex 可能吞掉表单项的 margin）
+    .el-row {
+      margin-bottom: 6px;
+
+      &:last-child {
+        margin-bottom: 0;
+      }
+    }
+
+    // 最后一项不需要底部间距
+    >.el-form-item:last-child {
+      margin-bottom: 0;
+    }
   }
 
   // 表单内联搜索项

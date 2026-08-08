@@ -10,6 +10,9 @@ const Layouts = () => import("@/layouts/index.vue")
  * @name 常驻路由
  * @description 除了 redirect/403/404/login 等隐藏页面，其他页面建议设置唯一的 Name 属性
  */
+// 这是一个全局重定向入口。当我们需要从外部系统（如邮件链接、第三方回调）跳转到应用内部时，
+// 统一经过 / redirect 页面。它会解析URL参数中的 path，用 router.replace 跳转到目标页，
+// 而且用 replace 是为了不污染浏览历史，避免用户后退时看到中间页
 export const constantRoutes: RouteRecordRaw[] = [
   {
     path: REDIRECT_PATH,
@@ -37,7 +40,7 @@ export const constantRoutes: RouteRecordRaw[] = [
     meta: {
       hidden: true
     },
-    alias: "/:pathMatch(.*)*"
+    alias: "/:pathMatch(.*)*"  //alias用户访问 /任意不存在的路径 时，会被匹配到 /404 路由
   },
   {
     path: "/login",
@@ -52,7 +55,8 @@ export const constantRoutes: RouteRecordRaw[] = [
     component: () => import("@/pages/map/index.vue"),
     name: "MapView",
     meta: {
-      hidden: true
+      hidden: true,
+      keepAlive: true
     }
   },
   {
@@ -172,7 +176,7 @@ export const constantRoutes: RouteRecordRaw[] = [
     name: "Supplier",
     meta: {
       title: "供应商管理",
-      elIcon: "Truck"
+      elIcon: "Van"
     },
     children: [
       {

@@ -1,6 +1,5 @@
 import antfu from "@antfu/eslint-config"
 
-// 更多自定义配置可查阅仓库：https://github.com/antfu/eslint-config
 export default antfu(
   {
     // 使用外部格式化程序格式化 css、html、markdown 等文件
@@ -21,7 +20,8 @@ export default antfu(
     // 对所有文件都生效的规则
     rules: {
       // vue
-      "vue/block-order": ["error", { order: ["script", "template", "style"] }],
+      // "vue/block-order": ["error", { order: ["template", "script", "style"] }],
+      "vue/block-order": "off",
       "vue/attributes-order": "off",
       // ts
       "ts/no-use-before-define": "off",
