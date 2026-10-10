@@ -75,8 +75,9 @@ function handleSizeChange(size) { pagination.pageSize = size; pagination.current
 
 <template>
   <div class="app-container">
-    <el-card shadow="never" class="search-wrapper">
-      <el-form :inline="true" :model="searchForm">
+    <el-card shadow="never">
+      <div class="toolbar-wrapper">
+         <el-form :inline="true" :model="searchForm">
         <el-form-item label="供应商名称">
           <el-input v-model="searchForm.name" placeholder="请输入" clearable @keyup.enter="handleSearch" />
         </el-form-item>
@@ -85,23 +86,21 @@ function handleSizeChange(size) { pagination.pageSize = size; pagination.current
           <el-button :icon="Refresh" @click="handleReset">重置</el-button>
         </el-form-item>
       </el-form>
-    </el-card>
-
-    <el-card shadow="never">
-      <div class="toolbar-wrapper">
-        <el-button type="primary" :icon="CirclePlus" @click="handleCreate">新增供应商</el-button>
+      <el-form-item>
+        <el-button type="primary" :icon="CirclePlus" @click="handleCreate" v-permission="['supplier:edit']">新增供应商</el-button>
         <el-tooltip content="刷新"><el-button :icon="Refresh" circle @click="loadData" /></el-tooltip>
+      </el-form-item>
       </div>
-      <el-table v-loading="loading" :data="tableData" stripe border>
+      <el-table v-loading="loading" :data="tableData" stripe>
         <el-table-column prop="name" label="供应商名称" min-width="180" show-overflow-tooltip />
-        <el-table-column prop="contactPerson" label="联系人" width="90" />
-        <el-table-column prop="contactPhone" label="联系电话" width="130" />
+        <el-table-column prop="contactPerson" label="联系人" min-width="100" show-overflow-tooltip />
+        <el-table-column prop="contactPhone" label="联系电话" min-width="130" show-overflow-tooltip />
         <el-table-column prop="address" label="地址" min-width="180" show-overflow-tooltip />
-        <el-table-column prop="description" label="备注" width="160" show-overflow-tooltip />
-        <el-table-column label="操作" width="140" fixed="right" align="center">
+        <el-table-column prop="description" label="备注" min-width="160" show-overflow-tooltip />
+        <el-table-column label="操作" min-width="140" fixed="right" align="center">
           <template #default="{ row }">
-            <el-button type="primary" link :icon="Edit" @click="handleEdit(row)">编辑</el-button>
-            <el-button type="danger" link :icon="Delete" @click="handleDelete(row)">删除</el-button>
+            <el-button type="primary" link :icon="Edit" @click="handleEdit(row)" v-permission="['supplier:edit']">编辑</el-button>
+            <el-button type="danger" link :icon="Delete" @click="handleDelete(row)" v-permission="['supplier:edit']">删除</el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -148,5 +147,5 @@ function handleSizeChange(size) { pagination.pageSize = size; pagination.current
 .app-container { padding: 16px; }
 .search-wrapper { margin-bottom: 16px; :deep(.el-card__body) { padding-bottom: 2px; } }
 .toolbar-wrapper { display: flex; justify-content: space-between; margin-bottom: 16px; align-items: center; }
-.pager-wrapper { display: flex; justify-content: flex-end; margin-top: 16px; }
+.pager-wrapper { display: flex; justify-content: flex-end; margin-top: 16px;margin-bottom: 50px; }
 </style>

@@ -2,12 +2,14 @@ package com.storeiq;
 
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.scheduling.annotation.EnableScheduling;
 
 /**
  * StoreIQ — 智能数码零售管理系统
  *
  * @author storeiq
  */
+@EnableScheduling
 @SpringBootApplication
 public class StoreIQApplication {
 

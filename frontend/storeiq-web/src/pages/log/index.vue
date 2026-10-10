@@ -65,14 +65,14 @@ function handleSizeChange(size) { pagination.pageSize = size; pagination.current
         <span style="color:#909399;font-size:13px">所有创建/修改/删除操作自动记录</span>
         <el-tooltip content="刷新"><el-button :icon="Refresh" circle @click="loadData" /></el-tooltip>
       </div>
-      <el-table v-loading="loading" :data="tableData" stripe border size="small">
-        <el-table-column prop="operatorName" label="操作人" width="100" />
-        <el-table-column prop="module" label="模块" width="100" align="center">
+      <el-table v-loading="loading" :data="tableData" stripe size="small">
+        <el-table-column prop="operatorName" label="操作人" min-width="100" show-overflow-tooltip />
+        <el-table-column prop="module" label="模块" min-width="100" align="center">
           <template #default="{ row }">
             <el-tag size="small" effect="plain">{{ row.module }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="90" align="center">
+        <el-table-column label="操作" min-width="90" align="center">
           <template #default="{ row }">
             <el-tag :type="row.action === 'DELETE' ? 'danger' : row.action === 'CREATE' ? 'success' : 'warning'" size="small" effect="plain">
               {{ row.action === 'CREATE' ? '新增' : row.action === 'UPDATE' ? '修改' : row.action === 'DELETE' ? '删除' : row.action }}
@@ -80,8 +80,8 @@ function handleSizeChange(size) { pagination.pageSize = size; pagination.current
           </template>
         </el-table-column>
         <el-table-column prop="detail" label="操作详情" min-width="200" show-overflow-tooltip />
-        <el-table-column prop="ipAddress" label="IP地址" width="130" />
-        <el-table-column label="操作时间" width="170">
+        <el-table-column prop="ipAddress" label="IP地址" min-width="130" show-overflow-tooltip />
+        <el-table-column label="操作时间" min-width="170">
           <template #default="{ row }">{{ row.createTime?.substring(0, 19) }}</template>
         </el-table-column>
       </el-table>

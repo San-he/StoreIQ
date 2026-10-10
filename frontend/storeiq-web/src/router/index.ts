@@ -230,6 +230,24 @@ export const constantRoutes: RouteRecordRaw[] = [
  */
 export const dynamicRoutes: RouteRecordRaw[] = [
   {
+    path: "/user",
+    component: Layouts,
+    name: "User",
+    meta: {
+      title: "用户管理",
+      elIcon: "User",
+      roles: ["superadmin"]
+    },
+    children: [
+      {
+        path: "",
+        component: () => import("@/pages/user/index.vue"),
+        name: "UserList",
+        meta: { title: "用户列表", roles: ["superadmin"] }
+      }
+    ]
+  },
+  {
     path: "/permission",
     component: Layouts,
     redirect: "/permission/page-level",

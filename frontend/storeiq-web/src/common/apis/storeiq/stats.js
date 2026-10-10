@@ -1,27 +1,27 @@
 import { request } from "@/http/axios"
 
-export function getOverviewApi() {
-  return request({ url: "/stats/overview", method: "get" })
+export function getOverviewApi(params = {}) {
+  return request({ url: "/stats/overview", method: "get", params })
 }
 
-export function getSalesMonthlyApi(year = 2026) {
-  return request({ url: `/stats/sales/monthly?year=${year}`, method: "get" })
+export function getSalesMonthlyApi(params = {}) {
+  return request({ url: "/stats/sales/monthly", method: "get", params })
 }
 
-export function getSalesQuarterlyApi(year = 2026) {
-  return request({ url: `/stats/sales/quarterly?year=${year}`, method: "get" })
+export function getSalesQuarterlyApi(params = {}) {
+  return request({ url: "/stats/sales/quarterly", method: "get", params })
 }
 
-export function getSalesByStoreApi() {
-  return request({ url: "/stats/sales/by-store", method: "get" })
+export function getSalesByStoreApi(params = {}) {
+  return request({ url: "/stats/sales/by-store", method: "get", params })
 }
 
-export function getSalesByCategoryApi() {
-  return request({ url: "/stats/sales/by-category", method: "get" })
+export function getSalesByCategoryApi(params = {}) {
+  return request({ url: "/stats/sales/by-category", method: "get", params })
 }
 
-export function getProfitTrendApi(year = 2026) {
-  return request({ url: `/stats/profit/trend?year=${year}`, method: "get" })
+export function getProfitTrendApi(params = {}) {
+  return request({ url: "/stats/profit/trend", method: "get", params })
 }
 
 export function getInventoryDistributionApi() {

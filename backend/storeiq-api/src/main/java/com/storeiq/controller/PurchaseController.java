@@ -6,10 +6,12 @@ import com.baomidou.mybatisplus.core.toolkit.StringUtils;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.storeiq.common.QueryPageParam;
 import com.storeiq.common.Result;
+import com.storeiq.dto.PurchaseBatchItem;
 import com.storeiq.dto.PurchaseRequest;
 import com.storeiq.entity.Inventory;
 import com.storeiq.entity.Product;
 import com.storeiq.entity.PurchaseRecord;
+import com.storeiq.entity.Supplier;
 import com.storeiq.mapper.InventoryMapper;
 import com.storeiq.mapper.ProductMapper;
 import com.storeiq.mapper.PurchaseRecordMapper;
@@ -25,6 +27,7 @@ import javax.validation.Valid;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -146,6 +149,114 @@ public class PurchaseController {
         map.put("productName", p != null ? p.getName() : "-");
         map.put("storeName", s != null ? s.getName() : "-");
         return Result.success(map);
+    }
+
+    /** 批量导入 */
+    @PostMapping("/batch")
+    @Transactional
+    public Result<?> batchSave(@RequestBody List<PurchaseBatchItem> items, HttpServletRequest request) {
+        Long userId = (Long) request.getAttribute("userId");
+        int success = 0;
+        List<String> errors = new ArrayList<>();
+
+        for (int i = 0; i < items.size(); i++) {
+            PurchaseBatchItem item = items.get(i);
+            try {
+                // 解析商品 SKU
+                Product product = productMapper.selectOne(
+                        new LambdaQueryWrapper<Product>().eq(Product::getCode, item.getProductCode()));
+                if (product == null) {
+                    errors.add("第" + (i + 1) + "行: 商品SKU「" + item.getProductCode() + "」不存在");
+                    continue;
+                }
+                // 解析店铺
+                com.storeiq.entity.Store store = storeMapper.selectOne(
+                        new LambdaQueryWrapper<com.storeiq.entity.Store>().eq(com.storeiq.entity.Store::getName, item.getStoreName()));
+                if (store == null) {
+                    errors.add("第" + (i + 1) + "行: 店铺「" + item.getStoreName() + "」不存在");
+                    continue;
+                }
+                // 解析供应商（选填）
+                Long supplierId = null;
+                if (StringUtils.isNotBlank(item.getSupplierName())) {
+                    Supplier supplier = supplierMapper.selectOne(
+                            new LambdaQueryWrapper<Supplier>().eq(Supplier::getName, item.getSupplierName()));
+                    if (supplier == null) {
+                        errors.add("第" + (i + 1) + "行: 供应商「" + item.getSupplierName() + "」不存在");
+                        continue;
+                    }
+                    supplierId = supplier.getId();
+                }
+
+                String batchNo = "P" + LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMddHHmmss"));
+                PurchaseRecord record = new PurchaseRecord();
+                record.setBatchNo(batchNo);
+                record.setProductId(product.getId());
+                record.setStoreId(store.getId());
+                record.setSupplierId(supplierId);
+                record.setQuantity(item.getQuantity());
+                record.setUnitCost(item.getUnitCost());
+                record.setTotalCost(item.getUnitCost().multiply(new BigDecimal(item.getQuantity())));
+                record.setOperatorId(userId);
+                record.setRemark(item.getRemark());
+                record.setCreateTime(LocalDateTime.now());
+                purchaseMapper.insert(record);
+
+                updateInventory(store.getId(), product.getId(), item.getQuantity());
+                success++;
+            } catch (Exception e) {
+                errors.add("第" + (i + 1) + "行: " + e.getMessage());
+            }
+        }
+
+        Map<String, Object> result = new HashMap<>();
+        result.put("success", success);
+        result.put("fail", items.size() - success);
+        result.put("errors", errors);
+        return Result.success(result);
+    }
+
+    /** 导出全部（根据筛选条件，不分页） */
+    @PostMapping("/export")
+    public Result<?> export(@RequestBody QueryPageParam query) {
+        HashMap<String, Object> param = query.getParam();
+        LambdaQueryWrapper<PurchaseRecord> wrapper = new LambdaQueryWrapper<>();
+
+        if (param != null) {
+            String productId = (String) param.get("productId");
+            String storeId = (String) param.get("storeId");
+            if (StringUtils.isNotBlank(productId)) wrapper.eq(PurchaseRecord::getProductId, Long.parseLong(productId));
+            if (StringUtils.isNotBlank(storeId)) wrapper.eq(PurchaseRecord::getStoreId, Long.parseLong(storeId));
+        }
+        wrapper.orderByDesc(PurchaseRecord::getCreateTime);
+
+        List<PurchaseRecord> records = purchaseMapper.selectList(wrapper);
+        List<Map<String, Object>> enriched = records.stream().map(r -> {
+            Map<String, Object> map = new HashMap<>();
+            map.put("id", r.getId());
+            map.put("batchNo", r.getBatchNo());
+            map.put("productId", r.getProductId());
+            map.put("storeId", r.getStoreId());
+            map.put("supplierId", r.getSupplierId());
+            map.put("quantity", r.getQuantity());
+            map.put("unitCost", r.getUnitCost());
+            map.put("totalCost", r.getTotalCost());
+            map.put("remark", r.getRemark());
+            map.put("createTime", r.getCreateTime());
+
+            Product p = productMapper.selectById(r.getProductId());
+            map.put("productName", p != null ? p.getName() : "-");
+            map.put("productCode", p != null ? p.getCode() : "-");
+
+            com.storeiq.entity.Store s = storeMapper.selectById(r.getStoreId());
+            map.put("storeName", s != null ? s.getName() : "-");
+
+            com.storeiq.entity.Supplier sup = supplierMapper.selectById(r.getSupplierId());
+            map.put("supplierName", sup != null ? sup.getName() : "-");
+            return map;
+        }).collect(Collectors.toList());
+
+        return Result.success(enriched);
     }
 
     /** 更新库存（增加） */

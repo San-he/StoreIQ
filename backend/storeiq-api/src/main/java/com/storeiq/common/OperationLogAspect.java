@@ -89,6 +89,8 @@ public class OperationLogAspect {
         if (methodName.contains("update") || methodName.startsWith("update")) return "UPDATE";
         if (methodName.contains("delete") || methodName.startsWith("delete")) return "DELETE";
         if (methodName.contains("create")) return "CREATE";
+        if (methodName.contains("add")) return "UPDATE";
+        if (methodName.contains("remove")) return "DELETE";
         return "UNKNOWN";
     }
 

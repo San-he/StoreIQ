@@ -206,7 +206,7 @@ function handleSizeChange(size) { pagination.pageSize = size; pagination.current
           <el-button :icon="Refresh" @click="handleReset">重置</el-button>
         </el-form-item>
         <el-form-item>
-        <el-button type="primary" :icon="CirclePlus" @click="handleCreate">新增店铺</el-button>
+        <el-button type="primary" :icon="CirclePlus" @click="handleCreate" v-permission="['store:edit']">新增店铺</el-button>
         <el-button :icon="Download" @click="handleExport">导出</el-button>
         <el-tooltip content="刷新">
           <el-button :icon="Refresh" circle @click="loadData" />
@@ -244,8 +244,8 @@ function handleSizeChange(size) { pagination.pageSize = size; pagination.current
         <el-table-column label="操作" width="150" fixed="right" align="center">
           <template #default="{ row }">
             <el-button type="info" link :icon="View" @click="handleDetail(row)" title="详情"></el-button>
-            <el-button type="primary" link :icon="Edit" @click="handleEdit(row)" title="编辑"></el-button>
-            <el-button type="danger" link :icon="Delete" @click="handleDelete(row)" title="删除"></el-button>
+            <el-button type="primary" link :icon="Edit" @click="handleEdit(row)" title="编辑" v-permission="['store:edit']"></el-button>
+            <el-button type="danger" link :icon="Delete" @click="handleDelete(row)" title="删除" v-permission="['store:edit']"></el-button>
           </template>
         </el-table-column>
       </el-table>

@@ -21,6 +21,7 @@ public class LoginResponse {
         private String username;
         private String nickname;
         private String role;
+        private List<String> roles;
         private String avatar;
         private List<String> permissions;
 
@@ -35,6 +36,9 @@ public class LoginResponse {
 
         public String getRole() { return role; }
         public void setRole(String role) { this.role = role; }
+
+        public List<String> getRoles() { return roles; }
+        public void setRoles(List<String> roles) { this.roles = roles; }
 
         public String getAvatar() { return avatar; }
         public void setAvatar(String avatar) { this.avatar = avatar; }

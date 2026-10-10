@@ -375,6 +375,27 @@ INSERT INTO `notification` VALUES
 (4, '2026年7月经营月报已生成', '本月全渠道销售额达¥1,253,680，利润¥286,430', 'monthly_report', 'info', 0, NULL, '2026-08-01 00:05:00'),
 (5, '续租提醒：上海陆家嘴店', '上海陆家嘴店租赁合同将于2026年9月30日到期，请及时续签', 'cost_reminder', 'warning', 0, NULL, '2026-08-01 09:00:00');
 
+-- ============================================================
+-- 11. cleanup_rule — 数据清理保留规则
+-- ============================================================
+DROP TABLE IF EXISTS `cleanup_rule`;
+CREATE TABLE `cleanup_rule` (
+  `id`             BIGINT       NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `table_type`     VARCHAR(50)  NOT NULL COMMENT '表类型: operation_log/purchase_record/sale_record',
+  `retention_days` INT          NOT NULL COMMENT '保留天数',
+  `store_ids`      VARCHAR(500) DEFAULT NULL COMMENT '保留的店铺ID(逗号分隔), NULL=全部保留',
+  `category_ids`   VARCHAR(500) DEFAULT NULL COMMENT '保留的分类ID(逗号分隔), NULL=全部保留',
+  `create_time`    DATETIME     DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `update_time`    DATETIME     DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_table_type` (`table_type`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='数据清理保留规则';
+
+INSERT INTO `cleanup_rule` VALUES
+(1, 'operation_log',    90,  NULL, NULL, NOW(), NOW()),
+(2, 'purchase_record', 365, NULL, NULL, NOW(), NOW()),
+(3, 'sale_record',     365, NULL, NULL, NOW(), NOW());
+
 SET FOREIGN_KEY_CHECKS = 1;
 
 -- ============================================================

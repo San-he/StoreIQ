@@ -11,3 +11,11 @@ export function getPurchaseDetailApi(id) {
 export function createPurchaseApi(data) {
   return request({ url: "/purchases", method: "post", data })
 }
+
+export function createPurchaseBatchApi(data) {
+  return request({ url: "/purchases/batch", method: "post", data })
+}
+
+export function exportPurchaseApi(data) {
+  return request({ url: "/purchases/export", method: "post", data })
+}

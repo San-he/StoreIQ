@@ -1,5 +1,6 @@
 package com.storeiq.controller;
 
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.storeiq.common.Result;
 import com.storeiq.entity.*;
 import com.storeiq.mapper.*;
@@ -7,11 +8,16 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 /**
- * 数据统计控制器 — 为 ECharts 提供数据
+ * 数据统计控制器 — 为 ECharts 提供数据，支持时间/商品/店铺筛选
  */
 @RestController
 @RequestMapping("/stats")
@@ -24,59 +30,87 @@ public class StatsController {
     @Autowired private InventoryMapper inventoryMapper;
     @Autowired private CategoryMapper categoryMapper;
 
+    /** 解析逗号分隔的 ID 字符串为列表 */
+    private List<Long> parseIds(String ids) {
+        if (ids == null || ids.trim().isEmpty()) return null;
+        return Stream.of(ids.split(",")).map(String::trim).filter(s -> !s.isEmpty()).map(Long::parseLong).collect(Collectors.toList());
+    }
+
+    /** 构建销售记录通用查询 */
+    private LambdaQueryWrapper<SaleRecord> buildSaleWrapper(List<Long> productIds, List<Long> storeIds, String startDate, String endDate) {
+        LambdaQueryWrapper<SaleRecord> w = new LambdaQueryWrapper<>();
+        if (productIds != null && !productIds.isEmpty()) w.in(SaleRecord::getProductId, productIds);
+        if (storeIds != null && !storeIds.isEmpty()) w.in(SaleRecord::getStoreId, storeIds);
+        if (startDate != null && !startDate.isEmpty())
+            w.ge(SaleRecord::getCreateTime, LocalDate.parse(startDate).atStartOfDay());
+        if (endDate != null && !endDate.isEmpty())
+            w.le(SaleRecord::getCreateTime, LocalDate.parse(endDate).atTime(23, 59, 59));
+        return w;
+    }
+
     /** 首页概览卡片 */
     @GetMapping("/overview")
-    public Result<?> overview() {
+    public Result<?> overview(
+            @RequestParam(required = false) String productIds,
+            @RequestParam(required = false) String storeIds,
+            @RequestParam(required = false) String startDate,
+            @RequestParam(required = false) String endDate) {
+
         Map<String, Object> data = new HashMap<>();
-
-        // 店铺数
         data.put("storeCount", storeMapper.selectCount(null));
-
-        // 商品数
         data.put("productCount", productMapper.selectCount(null));
 
-        // 本月销售额
-        Calendar cal = Calendar.getInstance();
-        cal.set(Calendar.DAY_OF_MONTH, 1);
-        cal.set(Calendar.HOUR_OF_DAY, 0);
-        cal.set(Calendar.MINUTE, 0);
-        cal.set(Calendar.SECOND, 0);
-        java.time.LocalDateTime monthStart = java.time.LocalDateTime.ofInstant(cal.toInstant(), java.time.ZoneId.systemDefault());
+        List<SaleRecord> sales = saleMapper.selectList(buildSaleWrapper(parseIds(productIds), parseIds(storeIds), startDate, endDate));
+        BigDecimal totalAmount = sales.stream().map(SaleRecord::getTotalAmount).reduce(BigDecimal.ZERO, BigDecimal::add);
+        BigDecimal totalProfit = sales.stream().map(SaleRecord::getProfit).reduce(BigDecimal.ZERO, BigDecimal::add);
 
-        List<SaleRecord> monthSales = saleMapper.selectList(
-                new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<SaleRecord>()
-                        .ge(SaleRecord::getCreateTime, monthStart));
-        BigDecimal monthAmount = monthSales.stream()
-                .map(SaleRecord::getTotalAmount)
-                .reduce(BigDecimal.ZERO, BigDecimal::add);
-        data.put("monthSales", monthAmount);
-
-        // 本月利润
-        BigDecimal monthProfit = monthSales.stream()
-                .map(SaleRecord::getProfit)
-                .reduce(BigDecimal.ZERO, BigDecimal::add);
-        data.put("monthProfit", monthProfit);
-
+        data.put("monthSales", totalAmount);
+        data.put("monthProfit", totalProfit);
+        data.put("saleCount", sales.size());
         return Result.success(data);
     }
 
     /** 月度销售额趋势 */
     @GetMapping("/sales/monthly")
-    public Result<?> salesMonthly(@RequestParam(defaultValue = "2026") int year) {
+    public Result<?> salesMonthly(
+            @RequestParam(required = false) String productIds,
+            @RequestParam(required = false) String storeIds,
+            @RequestParam(required = false) String startDate,
+            @RequestParam(required = false) String endDate) {
+
+        List<Long> pIds = parseIds(productIds);
+        List<Long> sIds = parseIds(storeIds);
+
+        int year = LocalDate.now().getYear();
+        if (startDate != null && !startDate.isEmpty()) year = LocalDate.parse(startDate).getYear();
+
         List<Map<String, Object>> result = new ArrayList<>();
         String[] months = {"1月","2月","3月","4月","5月","6月","7月","8月","9月","10月","11月","12月"};
 
         for (int m = 1; m <= 12; m++) {
-            java.time.LocalDateTime start = java.time.LocalDateTime.of(year, m, 1, 0, 0);
-            java.time.LocalDateTime end = m < 12
-                    ? java.time.LocalDateTime.of(year, m + 1, 1, 0, 0)
-                    : java.time.LocalDateTime.of(year + 1, 1, 1, 0, 0);
+            LocalDateTime start = LocalDateTime.of(year, m, 1, 0, 0);
+            LocalDateTime end = m < 12
+                    ? LocalDateTime.of(year, m + 1, 1, 0, 0)
+                    : LocalDateTime.of(year + 1, 1, 1, 0, 0);
 
-            List<SaleRecord> records = saleMapper.selectList(
-                    new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<SaleRecord>()
-                            .ge(SaleRecord::getCreateTime, start)
-                            .lt(SaleRecord::getCreateTime, end));
+            // 合并全局筛选与月份区间
+            LocalDateTime actualStart = start;
+            LocalDateTime actualEnd = end;
+            if (startDate != null && !startDate.isEmpty()) {
+                LocalDateTime filterStart = LocalDate.parse(startDate).atStartOfDay();
+                if (filterStart.isAfter(actualStart)) actualStart = filterStart;
+            }
+            if (endDate != null && !endDate.isEmpty()) {
+                LocalDateTime filterEnd = LocalDate.parse(endDate).atTime(23, 59, 59);
+                if (filterEnd.isBefore(actualEnd)) actualEnd = filterEnd;
+            }
 
+            LambdaQueryWrapper<SaleRecord> w = new LambdaQueryWrapper<>();
+            w.ge(SaleRecord::getCreateTime, actualStart).lt(SaleRecord::getCreateTime, actualEnd);
+            if (pIds != null && !pIds.isEmpty()) w.in(SaleRecord::getProductId, pIds);
+            if (sIds != null && !sIds.isEmpty()) w.in(SaleRecord::getStoreId, sIds);
+
+            List<SaleRecord> records = saleMapper.selectList(w);
             BigDecimal amount = records.stream().map(SaleRecord::getTotalAmount).reduce(BigDecimal.ZERO, BigDecimal::add);
             BigDecimal profit = records.stream().map(SaleRecord::getProfit).reduce(BigDecimal.ZERO, BigDecimal::add);
 
@@ -92,22 +126,34 @@ public class StatsController {
 
     /** 季度销售额 */
     @GetMapping("/sales/quarterly")
-    public Result<?> salesQuarterly(@RequestParam(defaultValue = "2026") int year) {
+    public Result<?> salesQuarterly(
+            @RequestParam(required = false) String productIds,
+            @RequestParam(required = false) String storeIds,
+            @RequestParam(required = false) String startDate,
+            @RequestParam(required = false) String endDate) {
+
+        List<Long> pIds = parseIds(productIds);
+        List<Long> sIds = parseIds(storeIds);
+
+        int year = LocalDate.now().getYear();
+        if (startDate != null && !startDate.isEmpty()) year = LocalDate.parse(startDate).getYear();
+
         List<Map<String, Object>> result = new ArrayList<>();
         String[] quarters = {"Q1","Q2","Q3","Q4"};
         int[][] ranges = {{1,3},{4,6},{7,9},{10,12}};
 
         for (int q = 0; q < 4; q++) {
-            java.time.LocalDateTime start = java.time.LocalDateTime.of(year, ranges[q][0], 1, 0, 0);
-            java.time.LocalDateTime end = q < 3
-                    ? java.time.LocalDateTime.of(year, ranges[q][1] + 1, 1, 0, 0)
-                    : java.time.LocalDateTime.of(year + 1, 1, 1, 0, 0);
+            LocalDateTime start = LocalDateTime.of(year, ranges[q][0], 1, 0, 0);
+            LocalDateTime end = q < 3
+                    ? LocalDateTime.of(year, ranges[q][1] + 1, 1, 0, 0)
+                    : LocalDateTime.of(year + 1, 1, 1, 0, 0);
 
-            List<SaleRecord> records = saleMapper.selectList(
-                    new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<SaleRecord>()
-                            .ge(SaleRecord::getCreateTime, start)
-                            .lt(SaleRecord::getCreateTime, end));
+            LambdaQueryWrapper<SaleRecord> w = new LambdaQueryWrapper<>();
+            w.ge(SaleRecord::getCreateTime, start).lt(SaleRecord::getCreateTime, end);
+            if (pIds != null && !pIds.isEmpty()) w.in(SaleRecord::getProductId, pIds);
+            if (sIds != null && !sIds.isEmpty()) w.in(SaleRecord::getStoreId, sIds);
 
+            List<SaleRecord> records = saleMapper.selectList(w);
             Map<String, Object> item = new HashMap<>();
             item.put("quarter", quarters[q]);
             item.put("amount", records.stream().map(SaleRecord::getTotalAmount).reduce(BigDecimal.ZERO, BigDecimal::add));
@@ -119,14 +165,30 @@ public class StatsController {
 
     /** 各店铺销售额对比 */
     @GetMapping("/sales/by-store")
-    public Result<?> salesByStore() {
+    public Result<?> salesByStore(
+            @RequestParam(required = false) String productIds,
+            @RequestParam(required = false) String storeIds,
+            @RequestParam(required = false) String startDate,
+            @RequestParam(required = false) String endDate) {
+
+        List<Long> pIds = parseIds(productIds);
+        List<Long> sIds = parseIds(storeIds);
+
         List<Store> stores = storeMapper.selectList(null);
         List<Map<String, Object>> result = new ArrayList<>();
 
         for (Store store : stores) {
-            List<SaleRecord> records = saleMapper.selectList(
-                    new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<SaleRecord>()
-                            .eq(SaleRecord::getStoreId, store.getId()));
+            if (sIds != null && !sIds.contains(store.getId())) continue;
+
+            LambdaQueryWrapper<SaleRecord> w = new LambdaQueryWrapper<>();
+            w.eq(SaleRecord::getStoreId, store.getId());
+            if (pIds != null && !pIds.isEmpty()) w.in(SaleRecord::getProductId, pIds);
+            if (startDate != null && !startDate.isEmpty())
+                w.ge(SaleRecord::getCreateTime, LocalDate.parse(startDate).atStartOfDay());
+            if (endDate != null && !endDate.isEmpty())
+                w.le(SaleRecord::getCreateTime, LocalDate.parse(endDate).atTime(23, 59, 59));
+
+            List<SaleRecord> records = saleMapper.selectList(w);
             Map<String, Object> item = new HashMap<>();
             item.put("storeName", store.getName());
             item.put("region", store.getRegion());
@@ -139,20 +201,29 @@ public class StatsController {
 
     /** 各分类销量占比 */
     @GetMapping("/sales/by-category")
-    public Result<?> salesByCategory() {
+    public Result<?> salesByCategory(
+            @RequestParam(required = false) String productIds,
+            @RequestParam(required = false) String storeIds,
+            @RequestParam(required = false) String startDate,
+            @RequestParam(required = false) String endDate) {
+
+        List<Long> pIds = parseIds(productIds);
+        List<Long> sIds = parseIds(storeIds);
+
         List<ProductCategory> categories = categoryMapper.selectList(null);
-        List<SaleRecord> allSales = saleMapper.selectList(null);
+        List<SaleRecord> allSales = saleMapper.selectList(buildSaleWrapper(null, sIds, startDate, endDate));
         List<Map<String, Object>> result = new ArrayList<>();
 
         for (ProductCategory cat : categories) {
-            // 找出该分类的所有 productId
-            List<Long> productIds = productMapper.selectList(
-                    new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<Product>()
-                            .eq(Product::getCategoryId, cat.getId()))
+            List<Long> catProductIds = productMapper.selectList(
+                    new LambdaQueryWrapper<Product>().eq(Product::getCategoryId, cat.getId()))
                     .stream().map(Product::getId).collect(Collectors.toList());
 
+            // 如果指定了 productIds，只统计这些商品
+            if (pIds != null) catProductIds.retainAll(pIds);
+
             BigDecimal amount = allSales.stream()
-                    .filter(s -> productIds.contains(s.getProductId()))
+                    .filter(s -> catProductIds.contains(s.getProductId()))
                     .map(SaleRecord::getTotalAmount)
                     .reduce(BigDecimal.ZERO, BigDecimal::add);
 
@@ -166,31 +237,41 @@ public class StatsController {
 
     /** 利润趋势 */
     @GetMapping("/profit/trend")
-    public Result<?> profitTrend(@RequestParam(defaultValue = "2026") int year) {
+    public Result<?> profitTrend(
+            @RequestParam(required = false) String productIds,
+            @RequestParam(required = false) String storeIds,
+            @RequestParam(required = false) String startDate,
+            @RequestParam(required = false) String endDate) {
+
+        List<Long> pIds = parseIds(productIds);
+        List<Long> sIds = parseIds(storeIds);
+
+        int year = LocalDate.now().getYear();
+        if (startDate != null && !startDate.isEmpty()) year = LocalDate.parse(startDate).getYear();
+
         List<Map<String, Object>> result = new ArrayList<>();
         String[] months = {"1月","2月","3月","4月","5月","6月","7月","8月","9月","10月","11月","12月"};
 
         for (int m = 1; m <= 12; m++) {
-            java.time.LocalDateTime start = java.time.LocalDateTime.of(year, m, 1, 0, 0);
-            java.time.LocalDateTime end = m < 12
-                    ? java.time.LocalDateTime.of(year, m + 1, 1, 0, 0)
-                    : java.time.LocalDateTime.of(year + 1, 1, 1, 0, 0);
+            LocalDateTime start = LocalDateTime.of(year, m, 1, 0, 0);
+            LocalDateTime end = m < 12
+                    ? LocalDateTime.of(year, m + 1, 1, 0, 0)
+                    : LocalDateTime.of(year + 1, 1, 1, 0, 0);
 
-            List<SaleRecord> records = saleMapper.selectList(
-                    new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<SaleRecord>()
-                            .ge(SaleRecord::getCreateTime, start)
-                            .lt(SaleRecord::getCreateTime, end));
+            LambdaQueryWrapper<SaleRecord> w = new LambdaQueryWrapper<>();
+            w.ge(SaleRecord::getCreateTime, start).lt(SaleRecord::getCreateTime, end);
+            if (pIds != null && !pIds.isEmpty()) w.in(SaleRecord::getProductId, pIds);
+            if (sIds != null && !sIds.isEmpty()) w.in(SaleRecord::getStoreId, sIds);
 
+            List<SaleRecord> records = saleMapper.selectList(w);
             Map<String, Object> item = new HashMap<>();
             item.put("month", months[m - 1]);
-            item.put("amount", records.stream().map(SaleRecord::getTotalAmount).reduce(BigDecimal.ZERO, BigDecimal::add));
-            item.put("profit", records.stream().map(SaleRecord::getProfit).reduce(BigDecimal.ZERO, BigDecimal::add));
-            // 利润率
-            BigDecimal amount = (BigDecimal) item.get("amount");
-            BigDecimal profit = (BigDecimal) item.get("profit");
+            BigDecimal amount = records.stream().map(SaleRecord::getTotalAmount).reduce(BigDecimal.ZERO, BigDecimal::add);
+            BigDecimal profit = records.stream().map(SaleRecord::getProfit).reduce(BigDecimal.ZERO, BigDecimal::add);
+            item.put("amount", amount);
+            item.put("profit", profit);
             item.put("profitRate", amount.compareTo(BigDecimal.ZERO) > 0
-                    ? profit.multiply(new BigDecimal(100)).divide(amount, 2, java.math.RoundingMode.HALF_UP) : 0);
-
+                    ? profit.multiply(new BigDecimal(100)).divide(amount, 2, RoundingMode.HALF_UP) : 0);
             result.add(item);
         }
         return Result.success(result);
@@ -204,7 +285,6 @@ public class StatsController {
         List<Inventory> allInv = inventoryMapper.selectList(null);
         List<Product> allProducts = productMapper.selectList(null);
 
-        // storeName -> { categoryName -> quantity }
         List<Map<String, Object>> result = new ArrayList<>();
         for (Store store : stores) {
             Map<String, Object> item = new HashMap<>();
@@ -225,7 +305,6 @@ public class StatsController {
             item.put("total", total);
             result.add(item);
         }
-        // 附加分类列表供前端使用
         Map<String, Object> resp = new HashMap<>();
         resp.put("categories", categories.stream().map(ProductCategory::getName).collect(Collectors.toList()));
         resp.put("data", result);
@@ -235,33 +314,30 @@ public class StatsController {
     /** 商品销售统计（按店铺/时间/分类筛选，含趋势） */
     @GetMapping("/product-sales")
     public Result<?> productSales(
-            @RequestParam(required = false) Long storeId,
+            @RequestParam(required = false) String storeIds,
             @RequestParam(required = false) String startDate,
             @RequestParam(required = false) String endDate,
             @RequestParam(required = false) Long categoryId,
             @RequestParam(defaultValue = "1") int pageNum,
             @RequestParam(defaultValue = "10") int pageSize) {
 
-        // SQL 按商品聚合（避免全量加载 4k+ 条销售记录到内存）
+        List<Long> sIds = parseIds(storeIds);
+        // product-sales 目前仅支持单店铺聚合，取第一个 ID
+        Long storeId = (sIds != null && !sIds.isEmpty()) ? sIds.get(0) : null;
+
         List<Map<String, Object>> aggRows = saleMapper.sumAmountByProduct(storeId);
         Set<Long> filteredProductIds = null;
         if (categoryId != null) {
             filteredProductIds = productMapper.selectList(
-                    new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<Product>()
-                            .eq(Product::getCategoryId, categoryId))
+                    new LambdaQueryWrapper<Product>().eq(Product::getCategoryId, categoryId))
                     .stream().map(Product::getId).collect(Collectors.toSet());
         }
 
-        // 计算上一时段趋势
-        java.time.LocalDateTime now = java.time.LocalDateTime.now();
-        java.time.LocalDate today = java.time.LocalDate.now();
-        java.time.LocalDate monthStart = today.withDayOfMonth(1);
-        String prevEnd = monthStart.atStartOfDay().minusSeconds(1).toString().replace("T", " ");
-        String prevStart = prevEnd.substring(0, 7) + "-01 00:00:00";
-        // 修正：上月同区间
-        java.time.LocalDateTime e = monthStart.atStartOfDay().minusSeconds(1);
-        prevStart = e.toLocalDate().minusMonths(1).withDayOfMonth(1).atStartOfDay().toString().replace("T", " ");
-        prevEnd = e.toString().replace("T", " ");
+        LocalDate today = LocalDate.now();
+        LocalDate monthStart = today.withDayOfMonth(1);
+        LocalDateTime e = monthStart.atStartOfDay().minusSeconds(1);
+        String prevStart = e.toLocalDate().minusMonths(1).withDayOfMonth(1).atStartOfDay().toString().replace("T", " ");
+        String prevEnd = e.toString().replace("T", " ");
 
         Map<Long, BigDecimal> prevAmountMap = saleMapper
                 .sumAmountByProductAndDate(storeId, prevStart, prevEnd)
@@ -270,7 +346,6 @@ public class StatsController {
                         m -> (BigDecimal) m.get("amount"),
                         BigDecimal::add));
 
-        // 组装结果
         List<Map<String, Object>> result = new ArrayList<>();
         for (Map<String, Object> row : aggRows) {
             Long pid = (Long) row.get("product_id");
@@ -311,10 +386,8 @@ public class StatsController {
             result.add(item);
         }
 
-        // 按销售额降序
         result.sort((a, b) -> ((BigDecimal) b.get("totalAmount")).compareTo((BigDecimal) a.get("totalAmount")));
 
-        // 分页
         long total = result.size();
         int from = (pageNum - 1) * pageSize;
         int to = Math.min(from + pageSize, result.size());

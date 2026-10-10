@@ -5,6 +5,8 @@ import { useUserStore } from "@/pinia/stores/user"
 export function checkPermission(rolesOrPermissions: string[]): boolean {
   if (isArray(rolesOrPermissions) && rolesOrPermissions.length > 0) {
     const { roles, permissions } = useUserStore()
+    // "all" 权限为超级管理员通配符
+    if (permissions.includes("all") || roles.includes("superadmin")) return true
     return roles.some(role => rolesOrPermissions.includes(role)) || permissions.some(permission => rolesOrPermissions.includes(permission))
   } else {
     console.error("参数必须是一个数组且长度大于 0，参考：checkPermission(['admin', 'permission:button-level'])")

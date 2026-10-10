@@ -2,18 +2,21 @@
 /**
  * 销售管理 — 记录表格 + 出库弹窗 + 扫码录入 + 利润计算
  */
-import { getSaleListApi, createSaleApi, scanProductApi } from '@@/apis/storeiq/sales'
+import { getSaleListApi, createSaleApi, createSaleBatchApi, scanProductApi } from '@@/apis/storeiq/sales'
 import { getProductAllApi } from '@@/apis/storeiq/products'
 import { getStoreMapApi } from '@@/apis/storeiq/stores'
-import { Search, Refresh, CirclePlus, Camera } from '@element-plus/icons-vue'
-import { ElMessage } from 'element-plus'
+import { Search, Refresh, CirclePlus, Camera, Upload, Download } from '@element-plus/icons-vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import * as XLSX from 'xlsx'
 
 defineOptions({ name: 'SaleManagement' })
 
 const loading = ref(false)
 const tableData = ref([])
+const selectedRows = ref([])
 const dialogVisible = ref(false)
 const formRef = ref(null)
+const importFileRef = ref(null)
 const scanCode = ref('')
 const productOptions = ref([])
 const storeOptions = ref([])
@@ -95,6 +98,87 @@ function handleDialogClose() { formRef.value?.resetFields() }
 function handlePageChange(page) { pagination.currentPage = page; loadData() }
 function handleSizeChange(size) { pagination.pageSize = size; pagination.currentPage = 1; loadData() }
 
+// ====== 导入/导出 ======
+
+/** 导出选中的数据（未选中则导出全部） */
+function handleExport() {
+  const rows = selectedRows.value.length ? selectedRows.value : tableData.value
+  if (!rows.length) { ElMessage.warning('没有可导出的数据'); return }
+  const data = rows.map((row) => ({
+    '商品': row.productName || '',
+    'SKU': row.productCode || '',
+    '出库店铺': row.storeName || '',
+    '数量': row.quantity,
+    '售价': row.unitPrice,
+    '销售额': row.totalAmount,
+    '利润': row.profit,
+    '客户': row.customerName || '',
+    '备注': row.remark || '',
+    '销售时间': row.createTime?.substring(0, 16) || ''
+  }))
+  const ws = XLSX.utils.json_to_sheet(data)
+  const wb = XLSX.utils.book_new()
+  XLSX.utils.book_append_sheet(wb, ws, '销售记录')
+  XLSX.writeFile(wb, `销售记录_${new Date().toISOString().substring(0, 10)}.xlsx`)
+  ElMessage.success(`已导出 ${data.length} 条记录`)
+}
+
+/** 导入 Excel */
+function handleImport(input) {
+  const file = input?.files?.[0]
+  if (!file) return
+  const reader = new FileReader()
+  reader.onload = (e) => {
+    try {
+      const wb = XLSX.read(e.target.result, { type: 'array' })
+      const ws = wb.Sheets[wb.SheetNames[0]]
+      const rows = XLSX.utils.sheet_to_json(ws, { header: 1 })
+      if (rows.length < 2) { ElMessage.warning('文件中没有数据'); return }
+      // 第一行为表头，从第二行开始解析
+      const items = rows.slice(1).filter((row) => row[0] && row[1] && row[2] && row[3]).map((row) => ({
+        productCode: String(row[0] || '').trim(),
+        storeName: String(row[1] || '').trim(),
+        quantity: Number(row[2]) || 0,
+        unitPrice: Number(row[3]) || 0,
+        customerName: String(row[4] || '').trim(),
+        remark: String(row[5] || '').trim()
+      }))
+      if (!items.length) { ElMessage.warning('没有解析到有效数据行'); return }
+      doBatchImport(items)
+    } catch { ElMessage.error('文件解析失败') }
+  }
+  reader.readAsArrayBuffer(file)
+  // 重置 input 以便重复选择同一文件
+  input.value = ''
+}
+
+async function doBatchImport(items) {
+  loading.value = true
+  try {
+    const res = await createSaleBatchApi(items)
+    const { success, fail, errors } = res.data || {}
+    let msg = `导入完成: 成功 ${success ?? 0} 条，失败 ${fail ?? 0} 条`
+    if (errors && errors.length) {
+      msg += '\n' + errors.slice(0, 5).join('\n')
+      if (errors.length > 5) msg += `\n...等 ${errors.length} 条错误`
+    }
+    ElMessageBox.alert(msg, '导入结果', { confirmButtonText: '确定', type: fail > 0 ? 'warning' : 'success' })
+    loadData()
+  } catch { ElMessage.error('导入失败') }
+  finally { loading.value = false }
+}
+
+/** 下载导入模板 */
+function handleDownloadTemplate() {
+  const headers = ['商品SKU（必填）', '店铺名称（必填）', '数量（必填）', '售价（必填）', '客户名称', '备注']
+  const example = ['PROD001', '总店', 2, 99.00, '张三', '']
+  const ws = XLSX.utils.aoa_to_sheet([headers, example])
+  ws['!cols'] = headers.map(() => ({ wch: 18 }))
+  const wb = XLSX.utils.book_new()
+  XLSX.utils.book_append_sheet(wb, ws, '销售导入模板')
+  XLSX.writeFile(wb, '销售导入模板.xlsx')
+}
+
 // 预估利润
 const estimatedProfit = computed(() => {
   if (!formData.quantity || !formData.unitPrice) return null
@@ -106,8 +190,11 @@ const estimatedProfit = computed(() => {
 
 <template>
   <div class="app-container">
-    <el-card shadow="never" class="search-wrapper">
-      <el-form :inline="true" :model="searchForm">
+
+
+    <el-card shadow="never">
+      <div class="toolbar-wrapper">
+          <el-form :inline="true" :model="searchForm">
         <el-form-item label="商品">
           <el-select v-model="searchForm.productId" placeholder="全部" clearable style="width:180px">
             <el-option v-for="p in productOptions" :key="p.id" :label="p.name" :value="p.id" />
@@ -122,38 +209,41 @@ const estimatedProfit = computed(() => {
           <el-button type="primary" :icon="Search" @click="handleSearch">搜索</el-button>
           <el-button :icon="Refresh" @click="handleReset">重置</el-button>
         </el-form-item>
+        <el-form-item>
+          <el-button type="primary" :icon="CirclePlus" @click="handleCreate" v-permission="['sale:edit']">新增出库</el-button>
+          <el-button :icon="Download" @click="handleExport">导出</el-button>
+          <el-button :icon="Upload" @click="importFileRef?.click()" v-permission="['sale:edit']">导入</el-button>
+          <el-button @click="handleDownloadTemplate">下载模板</el-button>
+          <input ref="importFileRef" type="file" accept=".xlsx,.xls" hidden @change="handleImport($event.target)" />
+        </el-form-item>
       </el-form>
-    </el-card>
-
-    <el-card shadow="never">
-      <div class="toolbar-wrapper">
-        <el-button type="primary" :icon="CirclePlus" @click="handleCreate">新增出库</el-button>
         <el-tooltip content="刷新"><el-button :icon="Refresh" circle @click="loadData" /></el-tooltip>
       </div>
-      <el-table v-loading="loading" :data="tableData" stripe border>
-        <el-table-column prop="productName" label="商品" min-width="150" show-overflow-tooltip />
-        <el-table-column prop="productCode" label="SKU" width="120" />
-        <el-table-column prop="storeName" label="出库店铺" width="130" />
-        <el-table-column label="数量" width="80" align="center">
+      <el-table v-loading="loading" :data="tableData" stripe row-key="id" @selection-change="(rows) => selectedRows = rows">
+        <el-table-column type="selection" width="50" reserve-selection />
+        <el-table-column prop="productName" label="商品" min-width="140" align="center" show-overflow-tooltip />
+        <el-table-column prop="productCode" label="SKU" min-width="120" align="center" show-overflow-tooltip />
+        <el-table-column prop="storeName" label="出库店铺" min-width="120" align="center" show-overflow-tooltip />
+        <el-table-column label="数量" min-width="80" align="center">
           <template #default="{ row }">
             <span style="color:#f56c6c;font-weight:600">-{{ row.quantity }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="售价" width="100" align="right">
+        <el-table-column label="售价" min-width="100" align="center">
           <template #default="{ row }">¥{{ row.unitPrice }}</template>
         </el-table-column>
-        <el-table-column label="销售额" width="110" align="right">
+        <el-table-column label="销售额" min-width="110" align="center">
           <template #default="{ row }">¥{{ row.totalAmount }}</template>
         </el-table-column>
-        <el-table-column label="利润" width="110" align="right">
+        <el-table-column label="利润" min-width="110" align="center">
           <template #default="{ row }">
             <span :style="{ color: row.profit > 0 ? '#67c23a' : '#f56c6c', fontWeight:'600' }">
               ¥{{ row.profit }}
             </span>
           </template>
         </el-table-column>
-        <el-table-column prop="customerName" label="客户" width="90" />
-        <el-table-column label="销售时间" width="160">
+        <el-table-column prop="customerName" label="客户" min-width="100" align="center" show-overflow-tooltip />
+        <el-table-column label="销售时间" min-width="160" align="center">
           <template #default="{ row }">{{ row.createTime?.substring(0,16) }}</template>
         </el-table-column>
       </el-table>
@@ -228,6 +318,7 @@ const estimatedProfit = computed(() => {
 .app-container { padding: 16px; }
 .search-wrapper { margin-bottom: 16px; :deep(.el-card__body) { padding-bottom: 2px; } }
 .toolbar-wrapper { display: flex; justify-content: space-between; margin-bottom: 16px; align-items: center; }
+.toolbar-left { display: flex; gap: 8px; align-items: center; }
 .pager-wrapper { display: flex; justify-content: flex-end; margin-top: 16px; }
 .scan-area { display: flex; gap: 8px; }
 </style>
