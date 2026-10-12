@@ -114,7 +114,7 @@ public class StoreController {
         return Result.success(records, result.getTotal());
     }
 
-    /** 地图标记（全量轻量，含销售额） */
+    /** 地图标记（全量轻量，含销售额/利润） */
     @GetMapping("/map")
     public Result<?> map() {
         List<Store> stores = storeMapper.selectList(
@@ -126,6 +126,13 @@ public class StoreController {
 
         // SQL 聚合销售额（只返回需要的店铺）
         Map<Long, BigDecimal> salesMap = saleRecordMapper.sumAmountByStoreIds(storeIds)
+                .stream().collect(Collectors.toMap(
+                        m -> (Long) m.get("store_id"),
+                        m -> (BigDecimal) m.get("total"),
+                        BigDecimal::add));
+
+        // SQL 聚合利润（地图柱状图高度依据）
+        Map<Long, BigDecimal> profitMap = saleRecordMapper.sumProfitByStoreIds(storeIds)
                 .stream().collect(Collectors.toMap(
                         m -> (Long) m.get("store_id"),
                         m -> (BigDecimal) m.get("total"),
@@ -150,6 +157,7 @@ public class StoreController {
             map.put("propertyType", store.getPropertyType());
             map.put("contactPerson", store.getContactPerson());
             map.put("totalSales", salesMap.getOrDefault(store.getId(), BigDecimal.ZERO));
+            map.put("profit", profitMap.getOrDefault(store.getId(), BigDecimal.ZERO));
 
             Integer used = invMap.getOrDefault(store.getId(), 0);
             map.put("used", used);

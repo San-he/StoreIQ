@@ -18,6 +18,10 @@ public interface SaleRecordMapper extends BaseMapper<SaleRecord> {
     @Select("<script>SELECT store_id, SUM(total_amount) AS total FROM sale_record WHERE store_id IN <foreach item='id' collection='ids' open='(' separator=',' close=')'>#{id}</foreach> GROUP BY store_id</script>")
     List<Map<String, Object>> sumAmountByStoreIds(@Param("ids") Set<Long> storeIds);
 
+    /** 按店铺聚合利润（只查需要的店铺） */
+    @Select("<script>SELECT store_id, SUM(profit) AS total FROM sale_record WHERE store_id IN <foreach item='id' collection='ids' open='(' separator=',' close=')'>#{id}</foreach> GROUP BY store_id</script>")
+    List<Map<String, Object>> sumProfitByStoreIds(@Param("ids") Set<Long> storeIds);
+
     /** 按商品聚合销售额和数量（支持店铺/分类筛选） */
     @Select("<script>SELECT product_id, SUM(quantity) AS qty, SUM(total_amount) AS amount FROM sale_record WHERE 1=1 <if test='storeId != null'> AND store_id = #{storeId}</if> GROUP BY product_id</script>")
     List<Map<String, Object>> sumAmountByProduct(@Param("storeId") Long storeId);
