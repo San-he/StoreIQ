@@ -28,7 +28,7 @@ CREATE TABLE `sys_user` (
   `nickname`    VARCHAR(50)   NOT NULL COMMENT '显示名称',
   `phone`       VARCHAR(20)   DEFAULT NULL COMMENT '手机号',
   `email`       VARCHAR(100)  DEFAULT NULL COMMENT '邮箱',
-  `role`        VARCHAR(20)   NOT NULL DEFAULT 'viewer' COMMENT '角色: superadmin/admin/manager/viewer',
+  `role`        VARCHAR(20)   NOT NULL DEFAULT 'manager' COMMENT '角色: superadmin/admin/manager',
   `avatar`      VARCHAR(255)  DEFAULT NULL COMMENT '头像URL',
   `status`      TINYINT       NOT NULL DEFAULT 1 COMMENT '0=禁用, 1=启用',
   `create_time` DATETIME      DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
@@ -37,11 +37,10 @@ CREATE TABLE `sys_user` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='系统用户';
 
 INSERT INTO `sys_user` VALUES
-(1, 'superadmin', '123456', '超级管理员', '18800000001', 'superadmin@storeiq.cn', 'superadmin', NULL, 1, NOW()),
-(2, 'admin',     '123456', '管理员李明',   '18800000002', 'admin@storeiq.cn',     'admin',      NULL, 1, NOW()),
-(3, 'manager01', '123456', '店长王芳',     '18800000003', 'wangfang@storeiq.cn',  'manager',    NULL, 1, NOW()),
-(4, 'manager02', '123456', '店长张伟',     '18800000004', 'zhangwei@storeiq.cn',  'manager',    NULL, 1, NOW()),
-(5, 'viewer01',  '123456', '观察员赵六',   '18800000005', 'zhaoliu@storeiq.cn',   'viewer',     NULL, 1, NOW());
+(1, 'superadmin', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy', '超级管理员', '18800000001', 'superadmin@storeiq.cn', 'superadmin', NULL, 1, NOW()),
+(2, 'admin',     '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy', '管理员李明',   '18800000002', 'admin@storeiq.cn',     'admin',      NULL, 1, NOW()),
+(3, 'manager01', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy', '店长王芳',     '18800000003', 'wangfang@storeiq.cn',  'manager',    NULL, 1, NOW()),
+(4, 'manager02', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy', '店长张伟',     '18800000004', 'zhangwei@storeiq.cn',  'manager',    NULL, 1, NOW());
 
 -- ============================================================
 -- 2. store — 店铺

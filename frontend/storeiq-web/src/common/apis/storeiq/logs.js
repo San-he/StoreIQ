@@ -7,3 +7,7 @@ export function getLogModulesApi() {
 export function getLogListApi(data) {
   return request({ url: "/logs/list", method: "post", data })
 }
+
+export function getRecentLogsApi() {
+  return request({ url: "/logs/recent", method: "get" })
+}

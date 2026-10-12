@@ -13,6 +13,7 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.HashMap;
 import java.util.List;
+import java.time.LocalDateTime;
 
 /**
  * 操作日志控制器
@@ -47,5 +48,17 @@ public class LogController {
 
         IPage<OperationLog> result = logMapper.selectPage(page, wrapper);
         return Result.success(result.getRecords(), result.getTotal());
+    }
+
+    /** 最近90天日志（大屏使用） */
+    @GetMapping("/recent")
+    public Result<?> recent() {
+        LocalDateTime ninetyDaysAgo = LocalDateTime.now().minusDays(90);
+        LambdaQueryWrapper<OperationLog> wrapper = new LambdaQueryWrapper<>();
+        wrapper.ge(OperationLog::getCreateTime, ninetyDaysAgo)
+               .orderByDesc(OperationLog::getCreateTime)
+               .last("LIMIT 100");
+        List<OperationLog> list = logMapper.selectList(wrapper);
+        return Result.success(list);
     }
 }

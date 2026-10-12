@@ -190,13 +190,81 @@ public class StatsController {
 
             List<SaleRecord> records = saleMapper.selectList(w);
             Map<String, Object> item = new HashMap<>();
+            item.put("storeId", store.getId());
             item.put("storeName", store.getName());
             item.put("region", store.getRegion());
             item.put("amount", records.stream().map(SaleRecord::getTotalAmount).reduce(BigDecimal.ZERO, BigDecimal::add));
             item.put("profit", records.stream().map(SaleRecord::getProfit).reduce(BigDecimal.ZERO, BigDecimal::add));
+
+            // 畅销商品（按数量聚合）
+            Map<Long, Integer> productQtyMap = new HashMap<>();
+            for (SaleRecord r : records) {
+                productQtyMap.merge(r.getProductId(), r.getQuantity(), Integer::sum);
+            }
+            String bestProductName = "-";
+            int maxQty = 0;
+            for (Map.Entry<Long, Integer> e : productQtyMap.entrySet()) {
+                if (e.getValue() > maxQty) {
+                    maxQty = e.getValue();
+                    Product p = productMapper.selectById(e.getKey());
+                    if (p != null) bestProductName = p.getName();
+                }
+            }
+            item.put("bestProductName", bestProductName);
+
+            // 上月数据（同比）
+            LocalDate today = LocalDate.now();
+            LocalDate lastMonth = today.minusMonths(1);
+            LocalDateTime prevStart = lastMonth.withDayOfMonth(1).atStartOfDay();
+            LocalDateTime prevEnd = today.withDayOfMonth(1).atStartOfDay().minusSeconds(1);
+            LambdaQueryWrapper<SaleRecord> pw = new LambdaQueryWrapper<>();
+            pw.eq(SaleRecord::getStoreId, store.getId());
+            pw.ge(SaleRecord::getCreateTime, prevStart);
+            pw.le(SaleRecord::getCreateTime, prevEnd);
+            List<SaleRecord> prevRecords = saleMapper.selectList(pw);
+            BigDecimal prevAmount = prevRecords.stream().map(SaleRecord::getTotalAmount).reduce(BigDecimal.ZERO, BigDecimal::add);
+            BigDecimal currAmount = (BigDecimal) item.get("amount");
+            item.put("prevAmount", prevAmount);
+            if (prevAmount.compareTo(BigDecimal.ZERO) > 0) {
+                BigDecimal change = currAmount.subtract(prevAmount).divide(prevAmount, 4, RoundingMode.HALF_UP).multiply(new BigDecimal(100));
+                item.put("yoy", change.setScale(1, RoundingMode.HALF_UP) + "%");
+            } else {
+                item.put("yoy", currAmount.compareTo(BigDecimal.ZERO) > 0 ? "新增" : "-");
+            }
+
             result.add(item);
         }
         return Result.success(result);
+    }
+
+    /** 库存告警 */
+    @GetMapping("/inventory/alerts")
+    public Result<?> inventoryAlerts() {
+        List<Inventory> allInv = inventoryMapper.selectList(null);
+        List<Store> stores = storeMapper.selectList(null);
+        Map<Long, String> storeMap = stores.stream().collect(Collectors.toMap(Store::getId, Store::getName));
+        List<Product> products = productMapper.selectList(null);
+        Map<Long, Product> productMap = products.stream().collect(Collectors.toMap(Product::getId, p -> p));
+
+        List<Map<String, Object>> alerts = new ArrayList<>();
+        for (Inventory inv : allInv) {
+            int qty = inv.getQuantity();
+            // 阈值为 5 件=紧急, 20 件=提醒
+            if (qty > 20) continue;
+            String alertType = qty <= 5 ? "urgent" : "warning";
+            Map<String, Object> item = new HashMap<>();
+            item.put("storeId", inv.getStoreId());
+            item.put("storeName", storeMap.getOrDefault(inv.getStoreId(), "-"));
+            item.put("productId", inv.getProductId());
+            Product p = productMap.get(inv.getProductId());
+            item.put("productName", p != null ? p.getName() : "-");
+            item.put("quantity", qty);
+            item.put("alertType", alertType);
+            item.put("updateTime", inv.getUpdateTime());
+            alerts.add(item);
+        }
+        alerts.sort((a, b) -> Integer.compare((int) a.get("quantity"), (int) b.get("quantity")));
+        return Result.success(alerts);
     }
 
     /** 各分类销量占比 */

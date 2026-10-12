@@ -246,43 +246,6 @@ export const dynamicRoutes: RouteRecordRaw[] = [
         meta: { title: "用户列表", roles: ["superadmin"] }
       }
     ]
-  },
-  {
-    path: "/permission",
-    component: Layouts,
-    redirect: "/permission/page-level",
-    name: "Permission",
-    meta: {
-      title: "权限演示",
-      elIcon: "Lock",
-      alwaysShow: true
-    },
-    children: [
-      {
-        path: "page-level",
-        component: () => import("@/pages/demo/permission/page-level.vue"),
-        name: "PermissionPageLevel",
-        meta: {
-          title: "页面级",
-          // 在路由中设置角色来控制访问
-          roles: ["admin"],
-          // 在路由中设置权限标识字符来控制访问
-          permissions: ["permission:page-level"]
-        }
-      },
-      {
-        path: "button-level",
-        component: () => import("@/pages/demo/permission/button-level.vue"),
-        name: "PermissionButtonLevel",
-        meta: {
-          title: "按钮级",
-          // 如果未设置，则不限制该页面的访问
-          roles: undefined,
-          // 在路由中设置权限标识字符来控制访问
-          permissions: ["permission:button-level"]
-        }
-      }
-    ]
   }
 ]
 
