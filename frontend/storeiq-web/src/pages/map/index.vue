@@ -4,16 +4,12 @@
     <header class="dash-header">
       <div class="header-bg"></div>
       <div class="header-content">
-        <div class="header-left">
-          <span class="hl-date">{{ dateStr }}</span><span class="hl-divider">|</span>
-          <span class="hl-week">{{ weekStr }}</span><span class="hl-divider">|</span>
-          <span class="hl-time">{{ timeStr }}</span><span class="hl-divider">|</span>
-          <span class="hl-weather">{{ weatherText }} {{ weatherTemp }}</span>
-        </div>
+        <!-- 时钟独立子组件：秒级更新只在子组件内重渲染，不再触发整屏模板 diff -->
+        <HeaderClock :weather-text="weatherText" :weather-temp="weatherTemp" />
         <div class="header-center"><span class="dash-title">智能数码零售管理系统</span></div>
         <div class="header-right">
-          <el-button size="small" type="primary" plain @click="router.push('/store/list')">管理后台</el-button>
-          <el-button size="small" text class="logout-btn" @click="handleLogout">退出登录</el-button>
+          <el-button size="small" type="primary" plain class="logout-btn" @click="router.push('/store/list')">管理后台</el-button>
+          <el-button size="small" type="primary" plain @click="handleLogout">退出登录</el-button>
         </div>
       </div>
     </header>
@@ -64,7 +60,7 @@
         <div class="indicator-row">
           <div class="ind-card"><span class="ind-val">{{ overview.saleCount || 0 }}</span><span class="ind-lbl">交易笔数</span></div>
           <div class="ind-card"><span class="ind-val">{{ storeList.length }}</span><span class="ind-lbl">在线店铺</span></div>
-          <div class="ind-card"><span class="ind-val danger">{{ storeList.filter(s => s.usageRate > 85).length }}</span><span class="ind-lbl">库存预警</span></div>
+          <div class="ind-card"><span class="ind-val danger">{{ warnStoreCount }}</span><span class="ind-lbl">库存预警</span></div>
           <div class="ind-card"><span class="ind-val">{{ totalProducts }}</span><span class="ind-lbl">在售商品</span></div>
         </div>
         <div class="map-wrapper">
@@ -75,7 +71,7 @@
           <div class="stat-item"><span class="stat-label">同比增长</span><span class="stat-value up">▲ 12.5%</span></div>
           <div class="stat-item"><span class="stat-label">环比增长</span><span class="stat-value up">▲ 3.2%</span></div>
           <div class="stat-item"><span class="stat-label">目标完成率</span><span class="stat-value">87.6%</span></div>
-          <div class="stat-item"><span class="stat-label">客单价</span><span class="stat-value">¥{{ formatMoney(overview.saleCount ? ((overview.monthSales || 0) / overview.saleCount) : 0) }}</span></div>
+          <div class="stat-item"><span class="stat-label">客单价</span><span class="stat-value">¥{{ formatMoney(avgPrice) }}</span></div>
         </div>
       </main>
 
@@ -121,9 +117,10 @@
  * 暗蓝色科技风
  */
 defineOptions({ name: 'MapView' })
-import { ref, computed, onMounted, onBeforeUnmount, onActivated, onDeactivated, nextTick } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { useUserStore } from '@/pinia/stores/user'
+import HeaderClock from './components/HeaderClock.vue'
 import { getStoreMapApi } from '@@/apis/storeiq/stores'
 import { getOverviewApi, getSalesMonthlyApi, getSalesByStoreApi, getSalesByCategoryApi, getProductSalesApi, getInventoryAlertsApi } from '@@/apis/storeiq/stats'
 import * as echarts from 'echarts'
@@ -183,6 +180,14 @@ let hoveredProvince = null // 当前悬停的省份 Group
 const mouse = new THREE.Vector2() // 鼠标归一化坐标
 let trendChart = null, pieChart = null, barChart = null
 let firstLoad = true
+let unmounted = false // 卸载标志：异步初始化链路各 await 后检查，防止加载中离开页面
+
+// ===== 鼠标拾取状态（rAF 节流 + 缓存）=====
+let pendingMouseEvent = null  // 最近一次 mousemove 事件（渲染循环中每帧至多处理一次）
+let canvasRect = null         // 画布 getBoundingClientRect 缓存（resize 时失效）
+let provincePickMeshes = null // 省份拾取 mesh 列表（首次拾取时预构建，之后复用）
+let lastPickClientX = -1      // 上次拾取的屏幕坐标（位移 <3px 跳过射线检测）
+let lastPickClientY = -1
 
 // ===== 店铺标签 / 信息卡（CSS2D）=====
 let labelRenderer = null      // CSS2D 渲染器（店铺名标签 + 悬停卡片）
@@ -196,6 +201,7 @@ const warningTweens = []      // 运行中的 Tween（卸载时停止）
 const warningTextures = []    // 警示环纹理（卸载时释放）
 let storeTooltip = null       // 悬停信息卡 CSS2DObject
 let storeTooltipEl = null     // 信息卡 DOM 元素
+let renderedTooltipKey = null // 信息卡已渲染内容标识（内容未变时跳过 DOM 重建）
 let hoveredPillar = null      // 当前悬停的柱体
 let pinnedPillar = null       // 双击固定显示卡片的柱体
 
@@ -214,22 +220,15 @@ const FLOW_RING_COUNT = 1            // 只动画最大环（大陆轮廓）
 const FLOW_MIN_POINTS = 50           // 过滤碎岛小环
 const FLOW_SPEED = 7                 // 流速（世界单位/秒）
 
-// ===== 顶部时钟/天气 =====
-const now = ref(new Date())
+// ===== 顶部天气（时钟已拆分到 HeaderClock 子组件，避免秒级更新触发整屏重渲染）=====
 const weatherText = ref('加载中...')
 const weatherTemp = ref('--')
-let clockTimer = null
 
-const dateStr = computed(() => {
-  const d = now.value
-  return `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日`
-})
-const timeStr = computed(() => now.value.toLocaleTimeString('zh-CN', { hour12: false }))
-const weekStr = computed(() => ['周日', '周一', '周二', '周三', '周四', '周五', '周六'][now.value.getDay()])
-
-function startClock() { clockTimer = setInterval(() => { now.value = new Date() }, 1000) }
+let weatherAbort = null // 天气请求中止控制器（卸载时取消在途请求）
 
 async function fetchWeather() {
+  weatherAbort?.abort()
+  weatherAbort = new AbortController()
   try {
     let lat = 39.9, lon = 116.4
     if (navigator.geolocation) {
@@ -240,13 +239,17 @@ async function fetchWeather() {
         lat = pos.coords.latitude; lon = pos.coords.longitude
       } catch { /* */ }
     }
-    const res = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat.toFixed(1)}&longitude=${lon.toFixed(1)}&current_weather=true`)
+    const res = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat.toFixed(1)}&longitude=${lon.toFixed(1)}&current_weather=true`, { signal: weatherAbort.signal })
     const json = await res.json()
     const w = json.current_weather
     const map = { 0: '晴', 1: '晴', 2: '多云', 3: '阴', 45: '雾', 51: '小雨', 53: '小雨', 55: '中雨', 61: '阵雨', 63: '中雨', 65: '大雨', 71: '小雪', 73: '中雪', 75: '大雪', 80: '阵雨', 95: '雷暴' }
     weatherText.value = map[w.weathercode] || '晴'
     weatherTemp.value = `${w.temperature}°C`
-  } catch { weatherText.value = '晴'; weatherTemp.value = '22°C' }
+  } catch (err) {
+    // 主动中止/卸载：静默返回，不写默认值
+    if (err?.name === 'AbortError' || unmounted) return
+    weatherText.value = '晴'; weatherTemp.value = '22°C'
+  }
 }
 
 // ===== 退出登录 =====
@@ -262,6 +265,9 @@ const totalStores = computed(() => overview.value?.storeCount || storeList.value
 const totalProducts = computed(() => overview.value?.productCount || 0)
 const monthAmount = computed(() => formatMoney(overview.value?.monthSales || 0))
 const monthProfit = computed(() => formatMoney(overview.value?.monthProfit || 0))
+// 模板内联表达式提取为 computed：原先每次模板重渲染都会重新求值
+const warnStoreCount = computed(() => storeList.value.filter((s) => s.usageRate > 85).length)
+const avgPrice = computed(() => (overview.value?.saleCount ? (overview.value.monthSales || 0) / overview.value.saleCount : 0))
 function formatMoney(val) {
   const n = Number(val)
   if (n >= 10000) return (n / 10000).toFixed(1) + 'w'
@@ -300,6 +306,7 @@ function calcCameraOffset() {
 const BLOOM_STRENGTH = 0.4    // Bloom 发光强度：越大光晕越强（影响所有发光元素）
 const BLOOM_RADIUS = 0.8      // Bloom 扩散半径：越大光晕越柔和
 const BLOOM_THRESHOLD = 0.5   // Bloom 亮度阈值：比它亮的像素才发光（边界线约 0.55 > 此值仍发光；柱顶已调暗到 0.34 不发光）
+const MAX_PIXEL_RATIO = 1.5   // 渲染像素比上限：2K 屏全分辨率 + Bloom 后处理开销过大；1.5 视觉差异小、GPU 负担明显降低（EffectComposer 各 RenderTarget 同步按此缩放）
 const PILLAR_OPACITY = 0.85   // 柱体透明度：调低更通透，调高更实
 const PILLAR_HEIGHT_MIN = 0.5    // 利润最低（或为 0）店铺的柱高
 const PILLAR_HEIGHT_MAX = 6   // 利润最高店铺的柱高（柱高与利润线性映射于这两者之间）
@@ -348,8 +355,8 @@ function initThreeScene() {
   // ---- 3. 创建 WebGL 渲染器 ----
   threeRenderer = new THREE.WebGLRenderer({ antialias: true, alpha: false })
   threeRenderer.setSize(container.clientWidth, container.clientHeight)
-  // 限制像素比，兼顾清晰度与性能
-  threeRenderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
+  // 限制像素比，兼顾清晰度与性能（MAX_PIXEL_RATIO 见顶部可调参数）
+  threeRenderer.setPixelRatio(Math.min(window.devicePixelRatio, MAX_PIXEL_RATIO))
   container.appendChild(threeRenderer.domElement)
 
   // ---- 3.5 CSS2D 渲染器（店铺名标签 + 悬停信息卡，DOM 覆盖在画布之上）----
@@ -414,6 +421,8 @@ function initThreeScene() {
   function animate() {
     threeAnimationId = requestAnimationFrame(animate)
     threeControls.update()
+    // 鼠标拾取：rAF 节流，每帧至多处理一次（与渲染同频）
+    processPendingPick()
     // 国界流光：流动虚线匀速行进
     updateFlowAnimation(Math.min(outlineClock.getDelta(), 0.1))
     // 报警动画补间推进
@@ -467,6 +476,9 @@ async function loadChinaProvinces() {
     const response = await fetch('/geo/china.json')
     if (!response.ok) throw new Error(`HTTP ${response.status}`)
     const geoJson = await response.json()
+
+    // 加载期间已卸载：放弃后续构建，避免向已销毁场景添加对象
+    if (unmounted || !threeScene) return
 
     if (!geoJson.features || !Array.isArray(geoJson.features)) {
       throw new Error('GeoJSON 格式错误：缺少 features 数组')
@@ -614,6 +626,9 @@ async function loadChinaOutline() {
     const response = await fetch('/geo/china-outline.json')
     if (!response.ok) throw new Error(`HTTP ${response.status}`)
     const data = await response.json()
+
+    // 加载期间已卸载：放弃后续构建
+    if (unmounted || !threeScene) return
 
     const { clientWidth, clientHeight } = threeContainerRef.value
     const rings = (data.rings || []).filter((r) => r.pointCount >= FLOW_MIN_POINTS)
@@ -788,6 +803,8 @@ function createGradientTexture() {
  * 柱子立在 XY 平面上，沿 Z 轴向上伸展
  */
 function loadStorePillars() {
+  // 加载期间已卸载：不创建任何资源（否则创建的对象会绕过卸载清理）
+  if (unmounted || !threeScene) return
   if (!storeList.value.length) return
 
   // 过滤出有坐标的店铺
@@ -893,6 +910,7 @@ function createWarningTexture() {
  * 柱顶上方红色警示环上升 + 淡出，循环往复（@tweenjs/tween.js）
  */
 function loadWarningAnimations() {
+  if (unmounted || !threeScene) return
   const warnPillars = storePillars.filter((p) => Number(p.userData.usageRate) > 85)
   if (!warnPillars.length) return
 
@@ -929,24 +947,51 @@ function loadWarningAnimations() {
 }
 
 // ===== 省份 Hover 交互 =====
+let cachedProvinceColors = null
+
+/**
+ * 省份配色（读取 CSS 变量，getComputedStyle 会强制样式计算，必须缓存）：
+ * 首次调用读取一次；主题切换时由 applyThemeToThree 失效重建。
+ * 注意：setProvinceHover / resetProvinceHover 在 mousemove 高频路径上调用。
+ */
 function getProvinceColors() {
-  return {
-    normalColor: getCssVar('--map-three-province-color') || '#3a75ad',
-    normalEmissive: getCssVar('--map-three-province-emissive') || '#1a5588',
-    normalEmissiveIntensity: Number(getCssVar('--map-three-emissive-intensity') || '0.8'),
-    normalBorderColor: getCssVar('--map-three-province-border') || '#88ccff',
-    normalBorderOpacity: 0.9,
-    hoverColor: getCssVar('--map-three-hover-color') || '#5cb8ff',
-    hoverEmissive: getCssVar('--map-three-hover-emissive') || '#2a9fd6',
-    hoverEmissiveIntensity: Number(getCssVar('--map-three-hover-emissive-intensity') || '1.0'),
-    hoverBorderColor: getCssVar('--map-three-hover-border') || '#bff0ff',
-    hoverBorderOpacity: 1.0,
+  if (!cachedProvinceColors) {
+    cachedProvinceColors = {
+      normalColor: getCssVar('--map-three-province-color') || '#3a75ad',
+      normalEmissive: getCssVar('--map-three-province-emissive') || '#1a5588',
+      normalEmissiveIntensity: Number(getCssVar('--map-three-emissive-intensity') || '0.8'),
+      normalBorderColor: getCssVar('--map-three-province-border') || '#88ccff',
+      normalBorderOpacity: 0.9,
+      hoverColor: getCssVar('--map-three-hover-color') || '#5cb8ff',
+      hoverEmissive: getCssVar('--map-three-hover-emissive') || '#2a9fd6',
+      hoverEmissiveIntensity: Number(getCssVar('--map-three-hover-emissive-intensity') || '1.0'),
+      hoverBorderColor: getCssVar('--map-three-hover-border') || '#bff0ff',
+      hoverBorderOpacity: 1.0,
+    }
   }
+  return cachedProvinceColors
 }
 
 function onMouseMove(event) {
-  // 计算鼠标归一化坐标（-1 ~ 1）
-  const rect = threeRenderer.domElement.getBoundingClientRect()
+  // 只缓存事件：实际射线检测由渲染循环中的 processPendingPick 每帧至多处理一次，
+  // 不再随 mousemove 高频触发（原先每个像素移动都做一次全量省份射线检测）
+  pendingMouseEvent = event
+}
+
+/** 渲染循环中调用：处理每帧至多一次的鼠标拾取 */
+function processPendingPick() {
+  if (!pendingMouseEvent) return
+  const event = pendingMouseEvent
+  pendingMouseEvent = null
+
+  // 位移 <3px 跳过：对高精度省份几何体做射线检测开销大，微小位移无需重查
+  if (Math.abs(event.clientX - lastPickClientX) < 3 && Math.abs(event.clientY - lastPickClientY) < 3) return
+  lastPickClientX = event.clientX
+  lastPickClientY = event.clientY
+
+  // rect 缓存：getBoundingClientRect 会强制布局，仅在 resize 后失效重取
+  if (!canvasRect) canvasRect = threeRenderer.domElement.getBoundingClientRect()
+  const rect = canvasRect
   mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1
   mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1
 
@@ -980,17 +1025,10 @@ function onMouseMove(event) {
     hideStoreTooltip()
   }
 
-  // 收集所有省份 mesh 用于射线检测
-  const allProvinceMeshes = []
-  provinceGroupMap.forEach((group) => {
-    group.children.forEach((child) => {
-      if (child instanceof THREE.Mesh) {
-        allProvinceMeshes.push(child)
-      }
-    })
-  })
+  // 省份拾取列表首次使用时预构建一次，之后复用（省份 Group 加载完成后不再变化）
+  if (!provincePickMeshes) buildProvincePickList()
 
-  const intersects = raycaster.intersectObjects(allProvinceMeshes, false)
+  const intersects = raycaster.intersectObjects(provincePickMeshes, false)
   if (intersects.length > 0) {
     // 命中省份 mesh，取其所属的 Group
     const hitMesh = intersects[0].object
@@ -1009,29 +1047,45 @@ function onMouseMove(event) {
   }
 }
 
+/** 预构建省份拾取 mesh 列表（原来每次 mousemove 都重建） */
+function buildProvincePickList() {
+  const meshes = []
+  provinceGroupMap.forEach((group) => {
+    group.children.forEach((child) => {
+      if (child instanceof THREE.Mesh) meshes.push(child)
+    })
+  })
+  provincePickMeshes = meshes
+}
+
 /** 显示店铺悬停信息卡：店名/利润/库存状态（pinned=true 时带固定标记） */
 function showStoreTooltip(pillar, pinned = false) {
   if (!storeTooltip || !storeTooltipEl) return
   const d = pillar.userData
-  const warn = Number(d.usageRate) > 85
-  storeTooltipEl.innerHTML = ''
-  const title = document.createElement('div')
-  title.className = 'sc-title'
-  title.textContent = d.storeName || '店铺'
-  if (pinned) {
-    const pinBadge = document.createElement('span')
-    pinBadge.className = 'sc-pin'
-    pinBadge.textContent = '已固定'
-    title.append(pinBadge)
+  const key = `${d.storeId ?? pillar.uuid}-${pinned ? 'p' : 'h'}`
+  // 内容未变时跳过 DOM 重建：原先柱体上每次 mousemove 都清空 innerHTML 重建 3 个节点
+  if (key !== renderedTooltipKey) {
+    renderedTooltipKey = key
+    const warn = Number(d.usageRate) > 85
+    storeTooltipEl.innerHTML = ''
+    const title = document.createElement('div')
+    title.className = 'sc-title'
+    title.textContent = d.storeName || '店铺'
+    if (pinned) {
+      const pinBadge = document.createElement('span')
+      pinBadge.className = 'sc-pin'
+      pinBadge.textContent = '已固定'
+      title.append(pinBadge)
+    }
+    const row1 = document.createElement('div')
+    row1.className = 'sc-row'
+    row1.innerHTML = `<span>利润</span><b>¥${(d.revenue ?? 0).toLocaleString()}</b>`
+    const row2 = document.createElement('div')
+    row2.className = 'sc-row'
+    row2.innerHTML = `<span>库存状态</span><b class="${warn ? 'sc-warn' : 'sc-ok'}">${warn ? '库存预警' : '正常'}</b>`
+    storeTooltipEl.append(title, row1, row2)
   }
-  const row1 = document.createElement('div')
-  row1.className = 'sc-row'
-  row1.innerHTML = `<span>利润</span><b>¥${(d.revenue ?? 0).toLocaleString()}</b>`
-  const row2 = document.createElement('div')
-  row2.className = 'sc-row'
-  row2.innerHTML = `<span>库存状态</span><b class="${warn ? 'sc-warn' : 'sc-ok'}">${warn ? '库存预警' : '正常'}</b>`
-  storeTooltipEl.append(title, row1, row2)
-  storeTooltipEl.classList.add('show') // 触发淡入过渡
+  storeTooltipEl.classList.add('show') // 触发淡入过渡（已显示时重复添加无副作用）
   // 信息卡紧贴柱顶（柱顶上方 0.5 锚定 + CSS margin 微调）
   storeTooltip.position.set(pillar.position.x, pillar.position.y, pillar.position.z + d.height / 2 + 0.5)
 }
@@ -1196,6 +1250,8 @@ async function loadAllData() {
       getOverviewApi(), getSalesMonthlyApi(), getSalesByStoreApi(), getSalesByCategoryApi(),
       getProductSalesApi({ pageSize: 5 }), getStoreMapApi(), getInventoryAlertsApi()
     ])
+    // 请求期间已卸载：不再写 ref、不再更新已销毁的图表
+    if (unmounted) return
     overview.value = overviewRes.data || {}
     monthlySales.value = monthlyRes.data || []
     storeSales.value = (storeRes.data || []).sort((a, b) => (Number(b.profit) || 0) - (Number(a.profit) || 0))
@@ -1207,7 +1263,7 @@ async function loadAllData() {
     updateTrendChart()
     updatePieChart()
     updateBarChart()
-  } catch { ElMessage.warning('数据加载失败') }
+  } catch { if (!unmounted) ElMessage.warning('数据加载失败') }
 }
 
 // ===== 告警自动滚动 =====
@@ -1232,6 +1288,7 @@ let themeObserver = null
 
 function applyThemeToThree() {
   if (!threeScene) return
+  cachedProvinceColors = null // 主题变量已切换，失效省份配色缓存
   const bg = getCssVar('--map-three-bg') || '#061429'
   threeScene.background.set(bg)
   if (threeScene.fog) threeScene.fog.color.set(bg)
@@ -1261,22 +1318,46 @@ function applyThemeToThree() {
   updateBarChart()
 }
 
+// 主题 class 名称（与 useTheme.ts 的 themeList 保持一致）
+const THEME_CLASSES = ['dark-blue', 'dark', 'light']
+
+/** 从 html class 字符串中提取当前主题名（无主题时返回空串） */
+function getThemeClass(classStr) {
+  return classStr?.split(/\s+/).find((c) => THEME_CLASSES.includes(c)) || ''
+}
+
 function setupThemeObserver() {
   themeObserver = new MutationObserver((mutations) => {
     for (const m of mutations) {
-      if (m.attributeName === 'class') {
-        nextTick(() => applyThemeToThree())
-        break
-      }
+      // 仅当主题 class 实际变化才重刷：灰色模式/色弱模式切换等无关 class 变化不再触发全套主题重绘
+      if (m.attributeName !== 'class') continue
+      if (getThemeClass(m.oldValue) === getThemeClass(m.target.getAttribute('class'))) continue
+      nextTick(() => applyThemeToThree())
+      break
     }
   })
-  themeObserver.observe(document.documentElement, { attributes: true })
+  themeObserver.observe(document.documentElement, { attributes: true, attributeOldValue: true })
 }
 
 // ===== 生命周期 =====
+// ===== resize 节流 =====
+let resizeRafId = null // resize 的 rAF 合并 ID（拖拽窗口时事件每秒几十次，每帧只执行一次）
+let lastResizeW = 0    // 上次已同步的画布尺寸（尺寸未变则跳过，避免重复重建 RenderTarget）
+let lastResizeH = 0
+
 function handleResize() {
-  if (threeRenderer && threeCamera && threeContainerRef.value) {
+  if (resizeRafId !== null) return // 本帧已有待执行的 resize，合并
+  resizeRafId = requestAnimationFrame(() => {
+    resizeRafId = null
+    if (!threeRenderer || !threeCamera || !threeContainerRef.value) return
     const { clientWidth, clientHeight } = threeContainerRef.value
+    if (!clientWidth || !clientHeight) return
+    // 尺寸未变跳过：EffectComposer.setSize 会销毁并重建全部 Bloom RenderTarget，代价高
+    if (clientWidth === lastResizeW && clientHeight === lastResizeH) return
+    lastResizeW = clientWidth
+    lastResizeH = clientHeight
+
+    canvasRect = null // 画布尺寸变化，射线检测用的 rect 缓存失效
     threeRenderer.setSize(clientWidth, clientHeight)
     threeCamera.aspect = clientWidth / clientHeight
     threeCamera.updateProjectionMatrix()
@@ -1286,65 +1367,77 @@ function handleResize() {
     outlineFlowMaterials.forEach((m) => m.resolution.set(clientWidth, clientHeight))
     // 同步 CSS2D 标签层尺寸
     labelRenderer?.setSize(clientWidth, clientHeight)
-  }
-  trendChart?.resize()
-  pieChart?.resize()
-  barChart?.resize()
+
+    trendChart?.resize()
+    pieChart?.resize()
+    barChart?.resize()
+  })
 }
 
 onMounted(async () => {
   if (firstLoad) {
     firstLoad = false
-    startClock()
     fetchWeather()
     initThreeScene()
     // 第二步：加载省份 3D 板块 + 国界流光轮廓（并行）
     await Promise.all([loadChinaProvinces(), loadChinaOutline()])
+    // 以下每一步 await 后都可能已卸载（用户加载中切走），必须中止后续初始化
+    if (unmounted) return
     await nextTick()
+    if (unmounted) return
     initCharts()
     await loadAllData()
+    if (unmounted) return
     loadStorePillars()         // 第四步：店铺利润渐变柱
     loadWarningAnimations()    // 第五步：报警动画（库存预警警示环）
     // TODO 后续步骤：tooltip
+    if (unmounted) return
     startAlertScroll()
   }
   window.addEventListener('resize', handleResize)
   setupThemeObserver()
 })
 
-onActivated(() => {
-  // keep-alive 激活时恢复渲染
-  if (threeAnimationId === null && effectComposer) {
-    function animate() {
-      threeAnimationId = requestAnimationFrame(animate)
-      threeControls?.update()
-      updateFlowAnimation(Math.min(outlineClock.getDelta(), 0.1))
-      warningTweenGroup.update()
-      effectComposer.render()
-      labelRenderer?.render(threeScene, threeCamera)
-    }
-    animate()
-  }
-  nextTick(() => { trendChart?.resize(); pieChart?.resize(); barChart?.resize() })
-})
+// 说明：本页面（/map）不在 AppMain 的 keep-alive 中（独立全屏路由），
+// 组件每次进出都完整挂载/卸载，无需 activated/deactivated 钩子
 
-onDeactivated(() => {
-  // keep-alive 失活时暂停渲染循环
-  if (threeAnimationId !== null) {
-    cancelAnimationFrame(threeAnimationId)
-    threeAnimationId = null
+// ===== 资源释放工具 =====
+/** 释放单个材质及其引用的纹理（map / emissiveMap 等） */
+function disposeMaterial(mat) {
+  for (const value of Object.values(mat)) {
+    if (value && value.isTexture) value.dispose()
   }
-})
+  mat.dispose()
+}
+
+/**
+ * 递归释放对象及其子树的 GPU 资源（几何体 / 材质 / 纹理）。
+ * scene.clear() 只是把对象从场景图摘除，不调用 dispose，显存不会回收；
+ * 必须先 dispose，renderer 收到 dispose 事件后才会真正释放 GPU 缓冲。
+ */
+function disposeObjectResources(root) {
+  if (!root) return
+  root.traverse((obj) => {
+    if (obj.geometry) obj.geometry.dispose()
+    if (Array.isArray(obj.material)) {
+      obj.material.forEach(disposeMaterial)
+    } else if (obj.material) {
+      disposeMaterial(obj.material)
+    }
+  })
+}
 
 onBeforeUnmount(() => {
+  unmounted = true // 先置标志：在途异步初始化链路检查到后立即中止
+  weatherAbort?.abort() // 取消在途天气请求
   window.removeEventListener('resize', handleResize)
+  if (resizeRafId !== null) { cancelAnimationFrame(resizeRafId); resizeRafId = null } // 取消待执行的 resize 合并回调
   if (themeObserver) { themeObserver.disconnect(); themeObserver = null }
   // 移除 mousemove / dblclick 监听
   if (threeRenderer?.domElement) {
     threeRenderer.domElement.removeEventListener('mousemove', onMouseMove)
     threeRenderer.domElement.removeEventListener('dblclick', onDoubleClick)
   }
-  if (clockTimer) clearInterval(clockTimer)
   stopAlertScroll()
   trendChart?.dispose(); pieChart?.dispose(); barChart?.dispose()
   // 清理 Three.js 资源
@@ -1366,10 +1459,14 @@ onBeforeUnmount(() => {
   storePillarMeshes.length = 0
   storePillars.length = 0
   storeLabels.length = 0
-  provinceLabels.forEach((m) => m.material?.map?.dispose())
+  provincePickMeshes = null
+  pendingMouseEvent = null
+  canvasRect = null
+  // 省份标签的网格/材质/纹理由下方 disposeObjectResources 统一释放
   provinceLabels.length = 0
   storeTooltip = null
   storeTooltipEl = null
+  renderedTooltipKey = null
   hoveredPillar = null
   pinnedPillar = null
   // 停止报警动画并释放纹理
@@ -1378,8 +1475,16 @@ onBeforeUnmount(() => {
   warningTextures.forEach((t) => t.dispose())
   warningTextures.length = 0
   bloomPass = null; raycaster = null; hoveredProvince = null
+  // 完整释放场景 GPU 资源（省份板块/柱体/拾取盒/标签/警示环等全部几何体与材质），
+  // 必须在 renderer.dispose() 之前执行，dispose 事件才会被 renderer 处理、显存才会回收
+  if (threeScene) {
+    disposeObjectResources(threeScene)
+    threeScene.clear()
+    threeScene = null
+  }
+  // provinceGroupMap 持有全部省份 Group 引用，必须清空
+  provinceGroupMap.clear()
   if (threeRenderer) { threeRenderer.dispose(); threeRenderer = null }
-  if (threeScene) { threeScene.clear(); threeScene = null }
 })
 </script>
 
@@ -1395,7 +1500,7 @@ onBeforeUnmount(() => {
     --el-button-bg-color: var(--map-btn-bg); --el-button-border-color: var(--map-btn-border); --el-button-text-color: var(--map-btn-text);
     --el-button-hover-bg-color: var(--map-btn-hover-bg); --el-button-hover-border-color: var(--map-btn-hover-border); --el-button-hover-text-color: var(--map-btn-hover-text);
   }
-  .logout-btn { color: var(--map-header-text); }
+  .logout-btn { color: var(--map-header-text);}
 }
 
 // Header
@@ -1403,14 +1508,11 @@ onBeforeUnmount(() => {
   height: 56px; position: relative; z-index: 20; flex-shrink: 0;
   .header-bg { position: absolute; inset: 0; background: url('/UI/0847.png') no-repeat center bottom; background-size: 100% 100%; opacity: 0.75; }
   .header-content { position: absolute; inset: 0; display: flex; align-items: flex-end; padding: 0 24px 8px; }
-  .header-left { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--map-header-text);
-    .hl-divider { color: var(--map-divider-color); }
-    .hl-time { font-weight: 600; color: var(--map-primary); letter-spacing: 1px; }
-  }
+  // .header-left 及 .hl-* 样式已随时钟一起拆入 HeaderClock.vue
   .header-center { position: absolute; left: 50%; transform: translateX(-50%); bottom: 8px;
     .dash-title { font-size: 26px; font-weight: 500; letter-spacing: 4px; color: var(--map-title-text); text-shadow: 0 0 20px var(--map-title-glow); }
   }
-  .header-right { display: flex; align-items: center; gap: 12px; margin-left: auto; }
+  .header-right { display: flex; align-items: flex-end; gap: 2px; margin-left: auto;margin-bottom: -10px;}
 }
 
 // Body
