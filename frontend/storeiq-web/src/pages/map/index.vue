@@ -1402,13 +1402,15 @@ onBeforeUnmount(() => {
 .dash-header {
   height: 56px; position: relative; z-index: 20; flex-shrink: 0;
   .header-bg { position: absolute; inset: 0; background: url('/UI/0847.png') no-repeat center bottom; background-size: 100% 100%; opacity: 0.75; }
-  .header-content { position: absolute; inset: 0; display: flex; align-items: center; justify-content: space-between; padding: 0 24px; }
+  .header-content { position: absolute; inset: 0; display: flex; align-items: flex-end; padding: 0 24px 8px; }
   .header-left { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--map-header-text);
     .hl-divider { color: var(--map-divider-color); }
     .hl-time { font-weight: 600; color: var(--map-primary); letter-spacing: 1px; }
   }
-  .header-center .dash-title { font-size: 26px; font-weight: 500; letter-spacing: 4px; color: var(--map-title-text); text-shadow: 0 0 20px var(--map-title-glow); }
-  .header-right { display: flex; align-items: center; gap: 12px; }
+  .header-center { position: absolute; left: 50%; transform: translateX(-50%); bottom: 8px;
+    .dash-title { font-size: 26px; font-weight: 500; letter-spacing: 4px; color: var(--map-title-text); text-shadow: 0 0 20px var(--map-title-glow); }
+  }
+  .header-right { display: flex; align-items: center; gap: 12px; margin-left: auto; }
 }
 
 // Body
