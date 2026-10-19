@@ -13,7 +13,7 @@
         <div class="header-center"><span class="dash-title">智能数码零售管理系统</span></div>
         <div class="header-right">
           <el-button size="small" type="primary" plain @click="router.push('/store/list')">管理后台</el-button>
-          <el-button size="small" text style="color:rgba(255,255,255,0.7)" @click="handleLogout">退出登录</el-button>
+          <el-button size="small" text class="logout-btn" @click="handleLogout">退出登录</el-button>
         </div>
       </div>
     </header>
@@ -149,6 +149,10 @@ import { Group, Tween, Easing } from '@tweenjs/tween.js'
 const router = useRouter()
 const userStore = useUserStore()
 
+function getCssVar(name) {
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim()
+}
+
 // ===== 数据 =====
 const storeList = ref([])
 const threeReady = ref(false)
@@ -168,7 +172,9 @@ let threeCamera = null     // 透视相机
 let threeRenderer = null   // WebGL 渲染器
 let threeControls = null   // 轨道控制器（旋转/缩放/平移）
 let threeAnimationId = null // requestAnimationFrame ID
-// 后处理：发光 Bloom
+let threeAmbientLight = null
+let threeDirLight = null
+let threeFillLight = null
 let effectComposer = null  // 效果组合器
 let bloomPass = null       // 发光通道
 // hover 交互
@@ -323,10 +329,9 @@ function initThreeScene() {
 
   // ---- 1. 创建场景 ----
   threeScene = new THREE.Scene()
-  // 背景色与面板暗蓝科技风保持一致
-  threeScene.background = new THREE.Color('#061429')
-  // 雾效：远处渐隐，营造深邃感
-  threeScene.fog = new THREE.Fog('#061429', 80, 300)
+  const sceneBg = getCssVar('--map-three-bg') || '#061429'
+  threeScene.background = new THREE.Color(sceneBg)
+  threeScene.fog = new THREE.Fog(sceneBg, 80, 300)
 
   // ---- 2. 创建透视相机 ----
   const aspect = container.clientWidth / container.clientHeight
@@ -372,17 +377,17 @@ function initThreeScene() {
   threeControls.update()
 
   // ---- 5. 灯光 ----
-  // 环境光：提供基础亮度
-  const ambientLight = new THREE.AmbientLight('#3a4d70', 2.0)
-  threeScene.add(ambientLight)
-  // 主平行光：西南上方，保持板块立体感
-  const dirLight = new THREE.DirectionalLight('#7fa5e0', 1.5)
-  dirLight.position.set(20, -20, 40)
-  threeScene.add(dirLight)
-  // 补光：东北低角度，打亮北/东立面，让 1.2 厚度可见
-  const fillLight = new THREE.DirectionalLight('#5577aa', 0.5)
-  fillLight.position.set(-15, 12, 8)
-  threeScene.add(fillLight)
+  const ambientColor = getCssVar('--map-three-ambient') || '#3a4d70'
+  const dirColor = getCssVar('--map-three-dir') || '#7fa5e0'
+  const fillColor = getCssVar('--map-three-fill') || '#5577aa'
+  threeAmbientLight = new THREE.AmbientLight(ambientColor, 2.0)
+  threeScene.add(threeAmbientLight)
+  threeDirLight = new THREE.DirectionalLight(dirColor, 1.5)
+  threeDirLight.position.set(20, -20, 40)
+  threeScene.add(threeDirLight)
+  threeFillLight = new THREE.DirectionalLight(fillColor, 0.5)
+  threeFillLight.position.set(-15, 12, 8)
+  threeScene.add(threeFillLight)
 
   // ---- 6. 后处理管线（发光 Bloom） ----
   effectComposer = new EffectComposer(threeRenderer)
@@ -468,6 +473,7 @@ async function loadChinaProvinces() {
     }
 
     // 遍历每个省份
+    const provColors = getProvinceColors()
     geoJson.features.forEach((feature) => {
       const { name, adcode, center } = feature.properties
       const { type, coordinates } = feature.geometry
@@ -485,7 +491,7 @@ async function loadChinaProvinces() {
           })
           const line = new THREE.Line(
             new THREE.BufferGeometry().setFromPoints(pts),
-            new THREE.LineDashedMaterial({ color: '#66ccff', dashSize: 1.2, gapSize: 0.8, transparent: true, opacity: 0.9 })
+            new THREE.LineDashedMaterial({ color: getCssVar('--map-three-jd-color') || '#66ccff', dashSize: 1.2, gapSize: 0.8, transparent: true, opacity: 0.9 })
           )
           line.computeLineDistances() // 必须调用，否则虚线显示为实线
           jdGroup.add(line)
@@ -518,9 +524,9 @@ async function loadChinaProvinces() {
 
           // 板块材质：实心亮蓝（常态即原 hover 样式），后续加发光边框
           const material = new THREE.MeshPhongMaterial({
-            color: NORMAL_COLOR,
-            emissive: NORMAL_EMISSIVE,
-            emissiveIntensity: NORMAL_EMISSIVE_INTENSITY,
+            color: provColors.normalColor,
+            emissive: provColors.normalEmissive,
+            emissiveIntensity: provColors.normalEmissiveIntensity,
             shininess: 8
           })
 
@@ -543,9 +549,9 @@ async function loadChinaProvinces() {
           bevelSegments: 1
         })
         const material = new THREE.MeshPhongMaterial({
-          color: NORMAL_COLOR,
-          emissive: NORMAL_EMISSIVE,
-          emissiveIntensity: NORMAL_EMISSIVE_INTENSITY,
+          color: provColors.normalColor,
+          emissive: provColors.normalEmissive,
+          emissiveIntensity: provColors.normalEmissiveIntensity,
           shininess: 8
         })
         const mesh = new THREE.Mesh(geometry, material)
@@ -560,9 +566,9 @@ async function loadChinaProvinces() {
           const edgesLine = new THREE.LineSegments(
             edgesGeo,
             new THREE.LineBasicMaterial({
-              color: NORMAL_BORDER_COLOR,
+              color: provColors.normalBorderColor,
               transparent: true,
-              opacity: NORMAL_BORDER_OPACITY
+              opacity: provColors.normalBorderOpacity
             })
           )
           provinceGroup.add(edgesLine)
@@ -630,7 +636,7 @@ async function loadChinaOutline() {
       const baseGeo = new LineGeometry()
       baseGeo.setPositions(flat)
       const baseMat = new LineMaterial({
-        color: OUTLINE_BASE_COLOR,
+        color: getCssVar('--map-three-outline-base') || OUTLINE_BASE_COLOR,
         linewidth: 2,
         opacity: 0.9,
         transparent: true,
@@ -648,7 +654,7 @@ async function loadChinaOutline() {
       // dashed:true 启用 USE_DASH：顶点着色器输出 vLineDistance（线段累计距离），
       // 片元中的原生虚线逻辑会被 onBeforeCompile 注入的流光代码替换
       const cometMat = new LineMaterial({
-        color: COMET_COLOR,
+        color: getCssVar('--map-three-comet') || COMET_COLOR,
         linewidth: COMET_LINEWIDTH,
         dashed: true,
         dashSize: 1,
@@ -748,8 +754,7 @@ function createTextTexture(text) {
   ctx.font = font
   ctx.textAlign = 'center'
   ctx.textBaseline = 'middle'
-  // 纯灰色文字：亮度低于 Bloom 阈值，不发光
-  ctx.fillStyle = 'rgba(160, 168, 184, 0.95)'
+  ctx.fillStyle = getCssVar('--map-three-label-text') || 'rgba(160, 168, 184, 0.95)'
   ctx.fillText(text, canvas.width / 2, canvas.height / 2)
   const tex = new THREE.CanvasTexture(canvas)
   // 关闭 mipmap：平贴地面的文字在斜视角度下 mip 层级切换会产生闪烁
@@ -768,11 +773,11 @@ function createGradientTexture() {
   canvas.height = 128
   const ctx = canvas.getContext('2d')
   const gradient = ctx.createLinearGradient(0, 0, 0, 128)
-  gradient.addColorStop(0, '#0b2d55')    // 底部：最暗（亮度渐变起点）
-  gradient.addColorStop(0.3, '#175f9e')  // 中下
-  gradient.addColorStop(0.6, '#3fa8e8')  // 中上
-  gradient.addColorStop(0.85, '#3397c5') // 上部
-  gradient.addColorStop(1, '#5dbae4')    // 顶部：调暗到亮度≈0.34，低于 Bloom 阈值不发光（边界线≈0.55 仍发光）
+  gradient.addColorStop(0, getCssVar('--map-three-gradient-0') || '#0b2d55')
+  gradient.addColorStop(0.3, getCssVar('--map-three-gradient-1') || '#175f9e')
+  gradient.addColorStop(0.6, getCssVar('--map-three-gradient-2') || '#3fa8e8')
+  gradient.addColorStop(0.85, getCssVar('--map-three-gradient-3') || '#3397c5')
+  gradient.addColorStop(1, getCssVar('--map-three-gradient-4') || '#5dbae4')
   ctx.fillStyle = gradient
   ctx.fillRect(0, 0, 1, 128)
   return new THREE.CanvasTexture(canvas)
@@ -868,14 +873,14 @@ function createWarningTexture() {
   canvas.width = 64
   canvas.height = 64
   const ctx = canvas.getContext('2d')
-  ctx.strokeStyle = '#ff7a7a'
+  ctx.strokeStyle = getCssVar('--map-three-warning-stroke') || '#ff7a7a'
   ctx.lineWidth = 4
-  ctx.shadowColor = '#ff4444'
+  ctx.shadowColor = getCssVar('--map-three-warning-shadow') || '#ff4444'
   ctx.shadowBlur = 10
   ctx.beginPath()
   ctx.arc(32, 32, 22, 0, Math.PI * 2)
   ctx.stroke()
-  ctx.fillStyle = '#ffb0b0'
+  ctx.fillStyle = getCssVar('--map-three-warning-fill') || '#ffb0b0'
   ctx.font = 'bold 30px Arial'
   ctx.textAlign = 'center'
   ctx.textBaseline = 'middle'
@@ -924,18 +929,20 @@ function loadWarningAnimations() {
 }
 
 // ===== 省份 Hover 交互 =====
-// 常态配色（原 hover 样式）：板块亮蓝 + 亮青边框
-const NORMAL_COLOR = '#3a75ad'
-const NORMAL_EMISSIVE = '#1a5588'
-const NORMAL_EMISSIVE_INTENSITY = 0.8
-const NORMAL_BORDER_COLOR = '#88ccff'
-const NORMAL_BORDER_OPACITY = 0.9
-// hover 高亮色：比常态更亮的青，边框近白青会触发 Bloom 光环
-const HOVER_EMISSIVE = '#2a9fd6'
-const HOVER_EMISSIVE_INTENSITY = 1.0
-const HOVER_COLOR = '#5cb8ff'
-const HOVER_BORDER_COLOR = '#bff0ff'
-const HOVER_BORDER_OPACITY = 1.0
+function getProvinceColors() {
+  return {
+    normalColor: getCssVar('--map-three-province-color') || '#3a75ad',
+    normalEmissive: getCssVar('--map-three-province-emissive') || '#1a5588',
+    normalEmissiveIntensity: Number(getCssVar('--map-three-emissive-intensity') || '0.8'),
+    normalBorderColor: getCssVar('--map-three-province-border') || '#88ccff',
+    normalBorderOpacity: 0.9,
+    hoverColor: getCssVar('--map-three-hover-color') || '#5cb8ff',
+    hoverEmissive: getCssVar('--map-three-hover-emissive') || '#2a9fd6',
+    hoverEmissiveIntensity: Number(getCssVar('--map-three-hover-emissive-intensity') || '1.0'),
+    hoverBorderColor: getCssVar('--map-three-hover-border') || '#bff0ff',
+    hoverBorderOpacity: 1.0,
+  }
+}
 
 function onMouseMove(event) {
   // 计算鼠标归一化坐标（-1 ~ 1）
@@ -1073,28 +1080,28 @@ function onDoubleClick(event) {
 }
 
 function setProvinceHover(group) {
+  const colors = getProvinceColors()
   group.children.forEach((child) => {
     if (child instanceof THREE.Mesh && child.material.isMeshPhongMaterial) {
-      // 存储原始状态（全字段），然后设置为高亮色
       child.userData._origColor = child.material.color.getHex()
       child.userData._origEmissive = child.material.emissive.getHex()
       child.userData._origEmissiveIntensity = child.material.emissiveIntensity
-      child.material.color.set(HOVER_COLOR)
-      child.material.emissive.set(HOVER_EMISSIVE)
-      child.material.emissiveIntensity = HOVER_EMISSIVE_INTENSITY
+      child.material.color.set(colors.hoverColor)
+      child.material.emissive.set(colors.hoverEmissive)
+      child.material.emissiveIntensity = colors.hoverEmissiveIntensity
     }
-    // 边框线变亮
     if (child instanceof THREE.LineSegments) {
       child.userData._origBorderColor = child.material.color.getHex()
       child.userData._origOpacity = child.material.opacity
-      child.material.color.set(HOVER_BORDER_COLOR)
-      child.material.opacity = HOVER_BORDER_OPACITY
+      child.material.color.set(colors.hoverBorderColor)
+      child.material.opacity = colors.hoverBorderOpacity
     }
   })
 }
 
 function resetProvinceHover() {
   if (!hoveredProvince) return
+  const colors = getProvinceColors()
   hoveredProvince.children.forEach((child) => {
     if (child instanceof THREE.Mesh && child.material.isMeshPhongMaterial) {
       if (child.userData._origColor !== undefined) {
@@ -1103,7 +1110,7 @@ function resetProvinceHover() {
       if (child.userData._origEmissive !== undefined) {
         child.material.emissive.setHex(child.userData._origEmissive)
       }
-      child.material.emissiveIntensity = child.userData._origEmissiveIntensity ?? NORMAL_EMISSIVE_INTENSITY
+      child.material.emissiveIntensity = child.userData._origEmissiveIntensity ?? colors.normalEmissiveIntensity
     }
     if (child instanceof THREE.LineSegments) {
       if (child.userData._origBorderColor !== undefined) {
@@ -1128,13 +1135,17 @@ function updateTrendChart() {
   const months = monthlySales.value.map(i => i.month)
   const amounts = monthlySales.value.map(i => Number(i.amount))
   const profits = monthlySales.value.map(i => Number(i.profit))
+  const primary = getCssVar('--map-primary') || '#409eff'
+  const success = getCssVar('--map-success') || '#67c23a'
+  const textSub = getCssVar('--map-text-sub') || 'rgba(224, 230, 240, 0.45)'
+  const axisLine = getCssVar('--map-table-border') || 'rgba(64,158,255,0.2)'
   trendChart.setOption({
     grid: { left: 12, right: 24, top: 8, bottom: 0 },
-    xAxis: { type: 'category', data: months, axisLine: { lineStyle: { color: 'rgba(255,255,255,0.15)' } }, axisLabel: { color: 'rgba(255,255,255,0.5)', fontSize: 10 } },
-    yAxis: { type: 'value', splitLine: { lineStyle: { color: 'rgba(255,255,255,0.06)' } }, axisLabel: { color: 'rgba(255,255,255,0.5)', fontSize: 10, formatter: v => v >= 10000 ? (v / 10000).toFixed(0) + 'w' : v } },
+    xAxis: { type: 'category', data: months, axisLine: { lineStyle: { color: axisLine } }, axisLabel: { color: textSub, fontSize: 10 } },
+    yAxis: { type: 'value', splitLine: { lineStyle: { color: axisLine } }, axisLabel: { color: textSub, fontSize: 10, formatter: v => v >= 10000 ? (v / 10000).toFixed(0) + 'w' : v } },
     series: [
-      { name: '销售额', type: 'line', data: amounts, smooth: true, symbol: 'circle', symbolSize: 4, lineStyle: { width: 2, color: '#409eff' }, itemStyle: { color: '#409eff' }, areaStyle: { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [{ offset: 0, color: 'rgba(64,158,255,0.35)' }, { offset: 1, color: 'rgba(64,158,255,0.02)' }]) } },
-      { name: '利润', type: 'line', data: profits, smooth: true, symbol: 'circle', symbolSize: 4, lineStyle: { width: 2, color: '#67c23a' }, itemStyle: { color: '#67c23a' }, areaStyle: { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [{ offset: 0, color: 'rgba(103,194,58,0.3)' }, { offset: 1, color: 'rgba(103,194,58,0.02)' }]) } }
+      { name: '销售额', type: 'line', data: amounts, smooth: true, symbol: 'circle', symbolSize: 4, lineStyle: { width: 2, color: primary }, itemStyle: { color: primary }, areaStyle: { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [{ offset: 0, color: primary + '59' }, { offset: 1, color: primary + '05' }]) } },
+      { name: '利润', type: 'line', data: profits, smooth: true, symbol: 'circle', symbolSize: 4, lineStyle: { width: 2, color: success }, itemStyle: { color: success }, areaStyle: { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [{ offset: 0, color: success + '4d' }, { offset: 1, color: success + '05' }]) } }
     ]
   })
 }
@@ -1142,25 +1153,38 @@ function updateTrendChart() {
 function updatePieChart() {
   if (!pieChart) return
   const data = categorySales.value.map(item => ({ name: item.categoryName || item.category, value: Number(item.amount) })).slice(0, 5)
+  const textSub = getCssVar('--map-text-sub') || 'rgba(224, 230, 240, 0.45)'
+  const text = getCssVar('--map-text') || '#e0e6f0'
+  const cardBg = getCssVar('--map-card-bg') || 'rgba(10, 30, 60, 0.9)'
+  const cardBorder = getCssVar('--map-card-border') || 'rgba(64,158,255,0.3)'
+  const mapBg = getCssVar('--map-bg') || '#061429'
   pieChart.setOption({
-    tooltip: { trigger: 'item', backgroundColor: 'rgba(10,30,60,0.9)', borderColor: 'rgba(64,158,255,0.3)', textStyle: { color: '#e0e6f0', fontSize: 12 } },
-    legend: { bottom: 0, textStyle: { color: 'rgba(255,255,255,0.5)', fontSize: 10 }, itemWidth: 8, itemHeight: 8 },
-    series: [{ type: 'pie', radius: ['50%', '72%'], center: ['50%', '45%'], label: { color: 'rgba(255,255,255,0.6)', fontSize: 10 }, labelLine: { lineStyle: { color: 'rgba(255,255,255,0.15)' } }, itemStyle: { borderColor: 'rgba(6,20,41,0.9)', borderWidth: 2 }, data }]
+    tooltip: { trigger: 'item', backgroundColor: cardBg, borderColor: cardBorder, textStyle: { color: text, fontSize: 12 } },
+    legend: { bottom: 0, textStyle: { color: textSub, fontSize: 10 }, itemWidth: 8, itemHeight: 8 },
+    series: [{ type: 'pie', radius: ['50%', '72%'], center: ['50%', '45%'], label: { color: textSub, fontSize: 10 }, labelLine: { lineStyle: { color: textSub } }, itemStyle: { borderColor: mapBg, borderWidth: 2 }, data }]
   })
 }
 
 function updateBarChart() {
   if (!barChart) return
-  const colors = ['#67c23a', '#409eff', '#f56c6c', '#a855f7', '#e6a23c']
+  const primary = getCssVar('--map-primary') || '#409eff'
+  const success = getCssVar('--map-success') || '#67c23a'
+  const danger = getCssVar('--map-danger') || '#f56c6c'
+  const purple = getCssVar('--map-purple') || '#a855f7'
+  const warning = getCssVar('--map-warning') || '#e6a23c'
+  const colors = [success, primary, danger, purple, warning]
+  const textSub = getCssVar('--map-text-sub') || 'rgba(224, 230, 240, 0.45)'
+  const text = getCssVar('--map-text') || '#e0e6f0'
+  const axisLine = getCssVar('--map-table-border') || 'rgba(64,158,255,0.2)'
   const top5 = productSales.value.slice(0, 5)
   barChart.setOption({
     grid: { left: 72, right: 24, top: 4, bottom: 0 },
-    xAxis: { type: 'value', splitLine: { lineStyle: { color: 'rgba(255,255,255,0.06)' } }, axisLabel: { color: 'rgba(255,255,255,0.4)', fontSize: 10 } },
-    yAxis: { type: 'category', inverse: true, data: top5.map(p => p.productName || p.name || '-'), axisLabel: { color: 'rgba(255,255,255,0.7)', fontSize: 11 }, axisLine: { show: false }, axisTick: { show: false } },
+    xAxis: { type: 'value', splitLine: { lineStyle: { color: axisLine } }, axisLabel: { color: textSub, fontSize: 10 } },
+    yAxis: { type: 'category', inverse: true, data: top5.map(p => p.productName || p.name || '-'), axisLabel: { color: text, fontSize: 11 }, axisLine: { show: false }, axisTick: { show: false } },
     series: [{
       type: 'bar', data: top5.map((p, i) => ({ value: Number(p.totalQuantity || p.quantity || 0), itemStyle: { color: colors[i % colors.length], borderRadius: [0, 4, 4, 0] } })),
       barWidth: 12,
-      label: { show: true, position: 'right', color: 'rgba(255,255,255,0.6)', fontSize: 10, formatter: '{c}' }
+      label: { show: true, position: 'right', color: textSub, fontSize: 10, formatter: '{c}' }
     }]
   })
 }
@@ -1203,6 +1227,52 @@ function stopAlertScroll() {
   if (alertScrollTimer) { clearInterval(alertScrollTimer); alertScrollTimer = null }
 }
 
+// ===== 主题切换适配 =====
+let themeObserver = null
+
+function applyThemeToThree() {
+  if (!threeScene) return
+  const bg = getCssVar('--map-three-bg') || '#061429'
+  threeScene.background.set(bg)
+  if (threeScene.fog) threeScene.fog.color.set(bg)
+  if (threeAmbientLight) threeAmbientLight.color.set(getCssVar('--map-three-ambient') || '#3a4d70')
+  if (threeDirLight) threeDirLight.color.set(getCssVar('--map-three-dir') || '#7fa5e0')
+  if (threeFillLight) threeFillLight.color.set(getCssVar('--map-three-fill') || '#5577aa')
+  if (bloomPass) {
+    bloomPass.threshold = Number(getCssVar('--map-three-bloom-threshold') || '0.5')
+    bloomPass.strength = Number(getCssVar('--map-three-bloom-strength') || '0.4')
+  }
+  const colors = getProvinceColors()
+  provinceGroupMap.forEach((group) => {
+    group.children.forEach((child) => {
+      if (child instanceof THREE.Mesh && child.material.isMeshPhongMaterial && !(child.userData._origColor !== undefined && hoveredProvince === group)) {
+        child.material.color.set(colors.normalColor)
+        child.material.emissive.set(colors.normalEmissive)
+        child.material.emissiveIntensity = colors.normalEmissiveIntensity
+      }
+      if (child instanceof THREE.LineSegments && !(child.userData._origBorderColor !== undefined && hoveredProvince === group)) {
+        child.material.color.set(colors.normalBorderColor)
+        child.material.opacity = colors.normalBorderOpacity
+      }
+    })
+  })
+  updateTrendChart()
+  updatePieChart()
+  updateBarChart()
+}
+
+function setupThemeObserver() {
+  themeObserver = new MutationObserver((mutations) => {
+    for (const m of mutations) {
+      if (m.attributeName === 'class') {
+        nextTick(() => applyThemeToThree())
+        break
+      }
+    }
+  })
+  themeObserver.observe(document.documentElement, { attributes: true })
+}
+
 // ===== 生命周期 =====
 function handleResize() {
   if (threeRenderer && threeCamera && threeContainerRef.value) {
@@ -1239,6 +1309,7 @@ onMounted(async () => {
     startAlertScroll()
   }
   window.addEventListener('resize', handleResize)
+  setupThemeObserver()
 })
 
 onActivated(() => {
@@ -1267,6 +1338,7 @@ onDeactivated(() => {
 
 onBeforeUnmount(() => {
   window.removeEventListener('resize', handleResize)
+  if (themeObserver) { themeObserver.disconnect(); themeObserver = null }
   // 移除 mousemove / dblclick 监听
   if (threeRenderer?.domElement) {
     threeRenderer.domElement.removeEventListener('mousemove', onMouseMove)
@@ -1313,21 +1385,17 @@ onBeforeUnmount(() => {
 
 
 <style lang="scss" scoped>
-$dash-card-bg: rgba(10, 35, 70, 0.55);
-$dash-card-border: rgba(64, 158, 255, 0.18);
-$dash-text: #e0e6f0;
-$dash-text-sub: rgba(224, 230, 240, 0.45);
-
 .dashboard {
   width: 100vw; height: 100vh;
-  background: #061429;
-  background-image: radial-gradient(ellipse at 50% 0%, rgba(64,158,255,0.08) 0%, transparent 60%), radial-gradient(ellipse at 80% 20%, rgba(0,100,200,0.05) 0%, transparent 50%);
+  background: var(--map-bg);
+  background-image: radial-gradient(ellipse at 50% 0%, var(--map-bg-glow1) 0%, transparent 60%), radial-gradient(ellipse at 80% 20%, var(--map-bg-glow2) 0%, transparent 50%);
   display: flex; flex-direction: column; overflow: hidden;
   font-family: 'Microsoft YaHei', sans-serif;
   :deep(.el-button--primary.is-plain) {
-    --el-button-bg-color: rgba(64,158,255,0.15); --el-button-border-color: rgba(64,158,255,0.4); --el-button-text-color: #409eff;
-    --el-button-hover-bg-color: rgba(64,158,255,0.25); --el-button-hover-border-color: #409eff; --el-button-hover-text-color: #fff;
+    --el-button-bg-color: var(--map-btn-bg); --el-button-border-color: var(--map-btn-border); --el-button-text-color: var(--map-btn-text);
+    --el-button-hover-bg-color: var(--map-btn-hover-bg); --el-button-hover-border-color: var(--map-btn-hover-border); --el-button-hover-text-color: var(--map-btn-hover-text);
   }
+  .logout-btn { color: var(--map-header-text); }
 }
 
 // Header
@@ -1335,11 +1403,11 @@ $dash-text-sub: rgba(224, 230, 240, 0.45);
   height: 56px; position: relative; z-index: 20; flex-shrink: 0;
   .header-bg { position: absolute; inset: 0; background: url('/UI/0847.png') no-repeat center bottom; background-size: 100% 100%; opacity: 0.75; }
   .header-content { position: absolute; inset: 0; display: flex; align-items: center; justify-content: space-between; padding: 0 24px; }
-  .header-left { display: flex; align-items: center; gap: 8px; font-size: 13px; color: rgba(224,234,250,0.8);
-    .hl-divider { color: rgba(255,255,255,0.25); }
-    .hl-time { font-weight: 600; color: #409eff; letter-spacing: 1px; }
+  .header-left { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--map-header-text);
+    .hl-divider { color: var(--map-divider-color); }
+    .hl-time { font-weight: 600; color: var(--map-primary); letter-spacing: 1px; }
   }
-  .header-center .dash-title { font-size: 26px; font-weight: 500; letter-spacing: 4px; color: rgba(252,253,254,0.92); text-shadow: 0 0 20px rgba(64,158,255,0.6); }
+  .header-center .dash-title { font-size: 26px; font-weight: 500; letter-spacing: 4px; color: var(--map-title-text); text-shadow: 0 0 20px var(--map-title-glow); }
   .header-right { display: flex; align-items: center; gap: 12px; }
 }
 
@@ -1350,12 +1418,12 @@ $dash-text-sub: rgba(224, 230, 240, 0.45);
 
 // Card
 .dash-card {
-  background: $dash-card-bg; backdrop-filter: blur(12px); border: 1px solid $dash-card-border;
-  border-radius: 8px; padding: 10px 12px; box-shadow: 0 2px 16px rgba(0,0,0,0.3);
-  .card-title { font-size: 13px; font-weight: 500; color: rgba(200,215,240,0.85); margin-bottom: 8px; display: flex; align-items: center; gap: 8px;
-    .title-icon { display: inline-block; width: 3px; height: 14px; background: linear-gradient(180deg, #409eff, #67c23a); border-radius: 2px; }
-    .title-icon.alert { background: linear-gradient(180deg, #e6a23c, #f56c6c); }
-    .title-icon.log { background: linear-gradient(180deg, #909399, #67c23a); }
+  background: var(--map-card-bg); backdrop-filter: blur(12px); border: 1px solid var(--map-card-border);
+  border-radius: 8px; padding: 10px 12px; box-shadow: var(--map-card-shadow);
+  .card-title { font-size: 13px; font-weight: 500; color: var(--map-card-title); margin-bottom: 8px; display: flex; align-items: center; gap: 8px;
+    .title-icon { display: inline-block; width: 3px; height: 14px; background: linear-gradient(180deg, var(--map-primary), var(--map-success)); border-radius: 2px; }
+    .title-icon.alert { background: linear-gradient(180deg, var(--map-warning), var(--map-danger)); }
+    .title-icon.log { background: linear-gradient(180deg, var(--map-info), var(--map-success)); }
   }
 }
 .card-panel { display: flex; flex-direction: column; overflow: hidden; }
@@ -1366,11 +1434,11 @@ $dash-text-sub: rgba(224, 230, 240, 0.45);
 // Overview
 .card-overview .overview-grid {
   display: grid; grid-template-columns: 1fr 1fr; gap: 8px;
-  .ov-item { background: rgba(0,60,120,0.18); border-radius: 6px; padding: 10px; text-align: center;
-    .ov-val { display: block; font-size: 22px; font-weight: 600; color: #409eff;
-      &.green { color: #67c23a; } &.blue { color: #409eff; }
+  .ov-item { background: var(--map-item-bg); border-radius: 6px; padding: 10px; text-align: center;
+    .ov-val { display: block; font-size: 22px; font-weight: 600; color: var(--map-primary);
+      &.green { color: var(--map-success); } &.blue { color: var(--map-primary); }
     }
-    .ov-lbl { font-size: 11px; color: $dash-text-sub; margin-top: 4px; display: block; }
+    .ov-lbl { font-size: 11px; color: var(--map-text-sub); margin-top: 4px; display: block; }
   }
 }
 
@@ -1380,96 +1448,93 @@ $dash-text-sub: rgba(224, 230, 240, 0.45);
 // Rank table
 .table-wrap { flex: 1; overflow: auto; min-height: 0; }
 .rank-table { width: 100%; border-collapse: collapse; font-size: 11px;
-  thead tr { border-bottom: 1px solid rgba(64,158,255,0.2); }
-  th { padding: 4px 4px; color: $dash-text-sub; font-weight: 400; text-align: left; white-space: nowrap; }
-  td { padding: 3px 4px; color: $dash-text; }
+  thead tr { border-bottom: 1px solid var(--map-table-border); }
+  th { padding: 4px 4px; color: var(--map-text-sub); font-weight: 400; text-align: left; white-space: nowrap; }
+  td { padding: 3px 4px; color: var(--map-text); }
   .td-name { max-width: 70px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .td-prod { max-width: 60px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: $dash-text-sub; font-size: 10px; }
-  .td-profit { color: #67c23a; font-weight: 500; }
+  .td-prod { max-width: 60px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--map-text-sub); font-size: 10px; }
+  .td-profit { color: var(--map-success); font-weight: 500; }
   .td-yoy { font-size: 10px;
-    &.up { color: #f56c6c; }
-    &.down { color: #67c23a; }
+    &.up { color: var(--map-danger); }
+    &.down { color: var(--map-success); }
   }
-  .rk-num { display: inline-block; width: 18px; height: 18px; border-radius: 3px; background: rgba(255,255,255,0.08); text-align: center; line-height: 18px; font-size: 10px; font-weight: 600; color: rgba(255,255,255,0.5);
-    &.rk-1 { background: #f56c6c; color: #fff; }
-    &.rk-2 { background: #e6a23c; color: #fff; }
-    &.rk-3 { background: #409eff; color: #fff; }
+  .rk-num { display: inline-block; width: 18px; height: 18px; border-radius: 3px; background: var(--map-rank-bg); text-align: center; line-height: 18px; font-size: 10px; font-weight: 600; color: var(--map-rank-text);
+    &.rk-1 { background: var(--map-danger); color: #fff; }
+    &.rk-2 { background: var(--map-warning); color: #fff; }
+    &.rk-3 { background: var(--map-primary); color: #fff; }
   }
 }
 
 // Indicators
 .indicator-row { display: flex; gap: 10px; flex-shrink: 0;
-  .ind-card { flex: 1; background: rgba(10,35,70,0.5); border: 1px solid rgba(64,158,255,0.15); border-radius: 8px; padding: 8px 12px; text-align: center;
-    .ind-val { display: block; font-size: 24px; font-weight: 700; color: #409eff;
-      &.danger { color: #f56c6c; }
+  .ind-card { flex: 1; background: var(--map-ind-bg); border: 1px solid var(--map-ind-border); border-radius: 8px; padding: 8px 12px; text-align: center;
+    .ind-val { display: block; font-size: 24px; font-weight: 700; color: var(--map-primary);
+      &.danger { color: var(--map-danger); }
     }
-    .ind-lbl { font-size: 11px; color: $dash-text-sub; margin-top: 2px; display: block; }
+    .ind-lbl { font-size: 11px; color: var(--map-text-sub); margin-top: 2px; display: block; }
   }
 }
 
 // Map
-.map-wrapper { flex: 1; min-height: 0; position: relative; border-radius: 8px; border: 1px solid rgba(64,158,255,0.15); overflow: hidden; background: #061429;
+.map-wrapper { flex: 1; min-height: 0; position: relative; border-radius: 8px; border: 1px solid var(--map-map-border); overflow: hidden; background: var(--map-three-bg);
   .three-container { width: 100%; height: 100%; transform: translateY(-10px); }
 }
-.map-loading { position: absolute; inset: 0; z-index: 10; display: flex; flex-direction: column; align-items: center; justify-content: center; background: rgba(6,20,41,0.95); color: #c9d1d9;
+.map-loading { position: absolute; inset: 0; z-index: 10; display: flex; flex-direction: column; align-items: center; justify-content: center; background: var(--map-loading-bg); color: var(--map-loading-text);
   p { margin-top: 12px; font-size: 14px; }
 }
-.loader-ring { width: 40px; height: 40px; border: 3px solid rgba(64,158,255,0.2); border-top-color: #409eff; border-radius: 50%; animation: dash-spin 1s linear infinite; }
+.loader-ring { width: 40px; height: 40px; border: 3px solid var(--map-loader-border); border-top-color: var(--map-primary); border-radius: 50%; animation: dash-spin 1s linear infinite; }
 @keyframes dash-spin { to { transform: rotate(360deg) } }
 
 // Bottom stats
 .bottom-stats { display: flex; gap: 10px; flex-shrink: 0;
-  .stat-item { flex: 1; background: rgba(10,35,70,0.45); border: 1px solid rgba(64,158,255,0.12); border-radius: 6px; padding: 6px 12px; text-align: center;
-    .stat-label { font-size: 11px; color: $dash-text-sub; display: block; }
-    .stat-value { font-size: 14px; font-weight: 600; color: $dash-text; margin-top: 2px; display: block;
-      &.up { color: #67c23a; }
+  .stat-item { flex: 1; background: var(--map-stat-bg); border: 1px solid var(--map-stat-border); border-radius: 6px; padding: 6px 12px; text-align: center;
+    .stat-label { font-size: 11px; color: var(--map-text-sub); display: block; }
+    .stat-value { font-size: 14px; font-weight: 600; color: var(--map-text); margin-top: 2px; display: block;
+      &.up { color: var(--map-success); }
     }
   }
 }
 
 // Alert table
 .alert-table-wrap { flex: 1; overflow: auto; min-height: 0;
-  // 隐藏滚动条
   &::-webkit-scrollbar { display: none; }
   -ms-overflow-style: none; scrollbar-width: none;
 }
 .alert-table { width: 100%; border-collapse: collapse; font-size: 10px;
-  thead tr { border-bottom: 1px solid rgba(230,162,60,0.2); }
-  th { padding: 2px 3px; color: $dash-text-sub; font-weight: 400; text-align: left; white-space: nowrap; }
-  td { padding: 2px 3px; color: $dash-text; }
+  thead tr { border-bottom: 1px solid var(--map-alert-border); }
+  th { padding: 2px 3px; color: var(--map-text-sub); font-weight: 400; text-align: left; white-space: nowrap; }
+  td { padding: 2px 3px; color: var(--map-text); }
   .td-prod { max-width: 55px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .td-qty { color: #f56c6c; font-weight: 500; }
+  .td-qty { color: var(--map-danger); font-weight: 500; }
   .alert-tag { display: inline-block; padding: 1px 4px; border-radius: 2px; font-size: 9px;
-    &.tag-urgent { background: rgba(245,108,108,0.2); color: #f56c6c; }
-    &.tag-warn { background: rgba(230,162,60,0.2); color: #e6a23c; }
+    &.tag-urgent { background: color-mix(in srgb, var(--map-danger) 20%, transparent); color: var(--map-danger); }
+    &.tag-warn { background: color-mix(in srgb, var(--map-warning) 20%, transparent); color: var(--map-warning); }
   }
 }
 </style>
 
 <style>
-/* ===== CSS2D 店铺标签与信息卡（元素由 JS 动态创建，不受 scoped 限制，需全局样式）===== */
 .store-label {
-  color: #9fdcff;
+  color: var(--map-label-color);
   font-size: 11px;
   white-space: nowrap;
-  text-shadow: 0 0 8px rgba(64, 158, 255, 0.9), 0 0 2px #000;
+  text-shadow: var(--map-label-shadow);
   pointer-events: none;
 }
 .store-card-wrap {
   pointer-events: none;
-  margin-top: -46px; /* CSS2D 默认居中锚定，向上偏移让卡片底边紧贴柱顶 */
+  margin-top: -46px;
 }
 .store-card {
   min-width: 140px;
   padding: 8px 10px;
-  background: rgba(8, 26, 52, 0.92);
-  border: 1px solid rgba(120, 200, 255, 0.45);
+  background: var(--map-tooltip-bg);
+  border: 1px solid var(--map-tooltip-border);
   border-radius: 6px;
-  box-shadow: 0 0 16px rgba(64, 158, 255, 0.35);
-  color: #dce8f8;
+  box-shadow: var(--map-tooltip-shadow);
+  color: var(--map-tooltip-text);
   font-size: 12px;
   pointer-events: none;
-  /* 出现/消失过渡：淡入 + 从柱顶方向轻微上浮放大 */
   opacity: 0;
   transform: translateY(10px) scale(0.9);
   transform-origin: bottom center;
@@ -1482,10 +1547,10 @@ $dash-text-sub: rgba(224, 230, 240, 0.45);
 .store-card .sc-title {
   font-size: 13px;
   font-weight: 600;
-  color: #7fd4ff;
+  color: var(--map-tooltip-title);
   margin-bottom: 6px;
   padding-bottom: 4px;
-  border-bottom: 1px solid rgba(120, 200, 255, 0.25);
+  border-bottom: 1px solid var(--map-tooltip-border-bottom);
   white-space: nowrap;
 }
 .store-card .sc-row {
@@ -1493,21 +1558,20 @@ $dash-text-sub: rgba(224, 230, 240, 0.45);
   justify-content: space-between;
   gap: 12px;
   line-height: 20px;
-  color: rgba(220, 232, 248, 0.7);
+  color: var(--map-tooltip-row-text);
   white-space: nowrap;
 }
-.store-card .sc-row b { color: #eaf6ff; font-weight: 600; }
-.store-card .sc-warn { color: #f56c6c !important; }
-.store-card .sc-ok { color: #67c23a !important; }
+.store-card .sc-row b { color: var(--map-tooltip-row-value); font-weight: 600; }
+.store-card .sc-warn { color: var(--map-danger) !important; }
+.store-card .sc-ok { color: var(--map-success) !important; }
 .store-card .sc-pin {
   float: right;
   font-size: 10px;
   font-weight: 400;
-  color: #ffd666;
-  border: 1px solid rgba(255, 214, 102, 0.5);
+  color: var(--map-tooltip-pin-color);
+  border: 1px solid var(--map-tooltip-pin-border);
   border-radius: 3px;
   padding: 0 4px;
   line-height: 16px;
-  /* background-color: #5dbae4; */
 }
 </style>
