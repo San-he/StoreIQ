@@ -95,7 +95,7 @@
               <thead><tr><th>时间</th><th>店铺</th><th>商品</th><th>库存</th><th>类型</th></tr></thead>
               <tbody>
                 <tr v-for="a in inventoryAlerts" :key="a.productId + '-' + a.storeId">
-                  <td>{{ (a.updateTime || '').substring(0, 16) }}</td>
+                  <td>{{ a.updateTime ? formatDateTime(a.updateTime, 'YYYY-MM-DD HH:mm') : '' }}</td>
                   <td>{{ a.storeName }}</td>
                   <td class="td-prod">{{ a.productName }}</td>
                   <td class="td-qty">{{ a.quantity }}</td>
@@ -121,6 +121,7 @@ import { ref, computed, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { useUserStore } from '@/pinia/stores/user'
 import HeaderClock from './components/HeaderClock.vue'
+import { formatDateTime } from '@@/utils/datetime'
 import { getStoreMapApi } from '@@/apis/storeiq/stores'
 import { getOverviewApi, getSalesMonthlyApi, getSalesByStoreApi, getSalesByCategoryApi, getProductSalesApi, getInventoryAlertsApi } from '@@/apis/storeiq/stats'
 import * as echarts from 'echarts'
@@ -1192,11 +1193,34 @@ function updateTrendChart() {
   const primary = getCssVar('--map-primary') || '#409eff'
   const success = getCssVar('--map-success') || '#67c23a'
   const textSub = getCssVar('--map-text-sub') || 'rgba(224, 230, 240, 0.45)'
+  const text = getCssVar('--map-text') || '#e0e6f0'
+  const cardBg = getCssVar('--map-card-bg') || 'rgba(10, 30, 60, 0.9)'
+  const cardBorder = getCssVar('--map-card-border') || 'rgba(64,158,255,0.3)'
   const axisLine = getCssVar('--map-table-border') || 'rgba(64,158,255,0.2)'
   trendChart.setOption({
-    grid: { left: 12, right: 24, top: 8, bottom: 0 },
-    xAxis: { type: 'category', data: months, axisLine: { lineStyle: { color: axisLine } }, axisLabel: { color: textSub, fontSize: 10 } },
-    yAxis: { type: 'value', splitLine: { lineStyle: { color: axisLine } }, axisLabel: { color: textSub, fontSize: 10, formatter: v => v >= 10000 ? (v / 10000).toFixed(0) + 'w' : v } },
+    // 留出坐标轴名称空间（x 轴"月份"、y 轴"金额"）
+    grid: { left: 44, right: 24, top: 22, bottom: 0 },
+    // 悬停提示：显示月份对应的销售额/利润具体数值
+    tooltip: {
+      trigger: 'axis',
+      backgroundColor: cardBg,
+      borderColor: cardBorder,
+      textStyle: { color: text, fontSize: 12 }
+    },
+    xAxis: {
+      type: 'category', data: months,
+      name: '月份',
+      nameTextStyle: { color: textSub, fontSize: 10 },
+      axisLine: { lineStyle: { color: axisLine } },
+      axisLabel: { color: textSub, fontSize: 10 }
+    },
+    yAxis: {
+      type: 'value',
+      name: '金额',
+      nameTextStyle: { color: textSub, fontSize: 10 },
+      splitLine: { lineStyle: { color: axisLine } },
+      axisLabel: { color: textSub, fontSize: 10, formatter: v => v >= 10000 ? (v / 10000).toFixed(0) + 'w' : v }
+    },
     series: [
       { name: '销售额', type: 'line', data: amounts, smooth: true, symbol: 'circle', symbolSize: 4, lineStyle: { width: 2, color: primary }, itemStyle: { color: primary }, areaStyle: { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [{ offset: 0, color: primary + '59' }, { offset: 1, color: primary + '05' }]) } },
       { name: '利润', type: 'line', data: profits, smooth: true, symbol: 'circle', symbolSize: 4, lineStyle: { width: 2, color: success }, itemStyle: { color: success }, areaStyle: { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [{ offset: 0, color: success + '4d' }, { offset: 1, color: success + '05' }]) } }
@@ -1206,7 +1230,13 @@ function updateTrendChart() {
 
 function updatePieChart() {
   if (!pieChart) return
-  const data = categorySales.value.map(item => ({ name: item.categoryName || item.category, value: Number(item.amount) })).slice(0, 5)
+  // 按销售额降序取前 5，过滤 0 金额分类：
+  // 后端返回 product_category 表全部分类（含无销售分类），原逻辑未排序直接截前 5，可能漏掉大额分类
+  const data = categorySales.value
+    .map(item => ({ name: item.categoryName || item.category, value: Number(item.amount) }))
+    .filter(item => item.value > 0)
+    .sort((a, b) => b.value - a.value)
+    .slice(0, 5)
   const textSub = getCssVar('--map-text-sub') || 'rgba(224, 230, 240, 0.45)'
   const text = getCssVar('--map-text') || '#e0e6f0'
   const cardBg = getCssVar('--map-card-bg') || 'rgba(10, 30, 60, 0.9)'
@@ -1550,7 +1580,16 @@ onBeforeUnmount(() => {
 .chart-box { width: 100%; flex: 1; min-height: 0; }
 
 // Rank table
-.table-wrap { flex: 1; overflow: auto; min-height: 0; }
+.table-wrap {
+  flex: 1; overflow: auto; min-height: 0;
+  // 细窄主题色滚动条：默认灰色滚动条与大屏风格格格不入
+  &::-webkit-scrollbar { width: 4px; height: 4px; }
+  &::-webkit-scrollbar-thumb { background: var(--map-table-border); border-radius: 2px; }
+  &::-webkit-scrollbar-thumb:hover { background: var(--map-primary); }
+  &::-webkit-scrollbar-track { background: transparent; }
+  scrollbar-width: thin; /* Firefox */
+  scrollbar-color: var(--map-table-border) transparent;
+}
 .rank-table { width: 100%; border-collapse: collapse; font-size: 11px;
   thead tr { border-bottom: 1px solid var(--map-table-border); }
   th { padding: 4px 4px; color: var(--map-text-sub); font-weight: 400; text-align: left; white-space: nowrap; }

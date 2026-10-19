@@ -4,6 +4,7 @@
  */
 import { useRoute, useRouter } from 'vue-router'
 import { getStoreDetailApi, getStoreInventoryApi, getStoreSalesTrendApi, getStoreInventoryPurchaseDatesApi } from '@@/apis/storeiq/stores'
+import { formatDateTime } from '@@/utils/datetime'
 import { ArrowLeft, Shop } from '@element-plus/icons-vue'
 import { PROPERTY_TYPE, STORE_STATUS, getDictLabel, getDictTag } from '@@/constants/dict'
 import * as echarts from 'echarts'
@@ -38,7 +39,7 @@ const monthlyCost = computed(() => {
 
 function formatDate(str) {
   if (!str) return '-'
-  return str.substring(0, 10)
+  return formatDateTime(str, 'YYYY-MM-DD')
 }
 
 async function loadData() {
@@ -163,7 +164,7 @@ function goBack() { router.push('/store/list') }
             <el-descriptions-item label="状态">
               <el-tag :type="getDictTag(STORE_STATUS, store.status)" size="small">{{ getDictLabel(STORE_STATUS, store.status) }}</el-tag>
             </el-descriptions-item>
-            <el-descriptions-item label="创建时间">{{ store.createTime?.substring(0, 10) }}</el-descriptions-item>
+            <el-descriptions-item label="创建时间">{{ store.createTime ? formatDateTime(store.createTime, 'YYYY-MM-DD') : '' }}</el-descriptions-item>
             <el-descriptions-item label="产权类型">{{ getDictLabel(PROPERTY_TYPE, store.propertyType) }}</el-descriptions-item>
             <el-descriptions-item label="月度成本">¥{{ monthlyCost.toLocaleString() }}
               <span style="color:#909399;font-size:12px;margin-left:4px">

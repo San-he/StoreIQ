@@ -1,6 +1,7 @@
 <script setup>
 import { Bell } from "@element-plus/icons-vue"
 import { getNotificationListApi, getUnreadCountApi, markReadApi, markAllReadApi } from '@@/apis/storeiq/notifications'
+import { formatDateTime } from '@@/utils/datetime'
 import CleanupDetailDialog from './CleanupDetailDialog.vue'
 
 const unreadCount = ref(0)
@@ -97,7 +98,7 @@ onUnmounted(() => { if (pollTimer) clearInterval(pollTimer) })
             <div v-if="item.type === 'data_cleanup'" class="notify-item cleanup-item">
               <div class="ni-header">
                 <el-tag :type="getTypeTag(item.type)" size="small" effect="plain">{{ getTypeLabel(item.type) }}</el-tag>
-                <span class="ni-time">{{ item.createTime?.substring(0, 16) }}</span>
+                <span class="ni-time">{{ item.createTime ? formatDateTime(item.createTime, 'YYYY-MM-DD HH:mm') : '' }}</span>
               </div>
               <div class="ni-title">{{ item.title }}</div>
               <div class="ni-content">{{ getCleanupSummary(item.content) }}</div>
@@ -113,7 +114,7 @@ onUnmounted(() => { if (pollTimer) clearInterval(pollTimer) })
             >
               <div class="ni-header">
                 <el-tag :type="getTypeTag(item.type)" size="small" effect="plain">{{ getTypeLabel(item.type) }}</el-tag>
-                <span class="ni-time">{{ item.createTime?.substring(0, 16) }}</span>
+                <span class="ni-time">{{ item.createTime ? formatDateTime(item.createTime, 'YYYY-MM-DD HH:mm') : '' }}</span>
               </div>
               <div class="ni-title">{{ item.title }}</div>
               <div class="ni-content">{{ item.content }}</div>

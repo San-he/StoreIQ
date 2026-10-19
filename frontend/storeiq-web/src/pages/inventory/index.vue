@@ -3,6 +3,7 @@
  * 库存管理 — 只读总览表格 + 筛选 + 预警高亮
  */
 import { getInventoryListApi, getInventoryAlertsApi } from '@@/apis/storeiq/inventory'
+import { formatDateTime } from '@@/utils/datetime'
 import { getStoreMapApi } from '@@/apis/storeiq/stores'
 import { getCategoryListApi } from '@@/apis/storeiq/categories'
 import { Search, Refresh, WarningFilled, Download } from '@element-plus/icons-vue'
@@ -138,7 +139,7 @@ function handleExport() {
           <template #default="{ row }">¥{{ row.salePrice }}</template>
         </el-table-column>
         <el-table-column label="更新时间">
-          <template #default="{ row }">{{ row.updateTime?.substring(0,16) }}</template>
+          <template #default="{ row }">{{ row.updateTime ? formatDateTime(row.updateTime, 'YYYY-MM-DD HH:mm') : '' }}</template>
         </el-table-column>
       </el-table>
       <div class="pager-wrapper">

@@ -10,6 +10,7 @@ import {
   getSalesByStoreApi, getSalesByCategoryApi, getProfitTrendApi, getInventoryDistributionApi
 } from '@@/apis/storeiq/stats'
 import { getSaleListApi } from '@@/apis/storeiq/sales'
+import { formatDateTime } from '@@/utils/datetime'
 import { getProductAllApi } from '@@/apis/storeiq/products'
 import { getStoreMapApi } from '@@/apis/storeiq/stores'
 import { Search, Refresh, Download } from '@element-plus/icons-vue'
@@ -255,7 +256,7 @@ function handleExport() {
     '销量': row.quantity,
     '销售额': row.totalAmount,
     '利润': row.profit,
-    '时间': row.createTime?.substring(0, 10) || ''
+    '时间': row.createTime ? formatDateTime(row.createTime, 'YYYY-MM-DD') : ''
   }))
   const ws = XLSX.utils.json_to_sheet(data)
   const wb = XLSX.utils.book_new()
@@ -368,7 +369,7 @@ watch(activeTab, handleTabChange)
               <template #default="{ row }"><span :style="{ color: row.profit > 0 ? '#67c23a' : '#f56c6c' }">¥{{ row.profit }}</span></template>
             </el-table-column>
             <el-table-column label="时间" min-width="150">
-              <template #default="{ row }">{{ row.createTime?.substring(0, 10) }}</template>
+              <template #default="{ row }">{{ row.createTime ? formatDateTime(row.createTime, 'YYYY-MM-DD') : '' }}</template>
             </el-table-column>
           </el-table>
           <el-pagination

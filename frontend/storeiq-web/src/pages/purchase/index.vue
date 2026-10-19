@@ -3,6 +3,7 @@
  * 进货管理 — 记录表格 + 新增入库弹窗（联动库存）
  */
 import { getPurchaseListApi, createPurchaseApi, createPurchaseBatchApi } from '@@/apis/storeiq/purchases'
+import { formatDateTime } from '@@/utils/datetime'
 import { getProductAllApi } from '@@/apis/storeiq/products'
 import { getStoreMapApi } from '@@/apis/storeiq/stores'
 import { getSupplierAllApi } from '@@/apis/storeiq/suppliers'
@@ -96,7 +97,7 @@ function handleExport() {
     '单价': row.unitCost,
     '总成本': row.totalCost,
     '备注': row.remark || '',
-    '入库时间': row.createTime?.substring(0, 16) || ''
+    '入库时间': row.createTime ? formatDateTime(row.createTime, 'YYYY-MM-DD HH:mm') : ''
   }))
   const ws = XLSX.utils.json_to_sheet(data)
   const wb = XLSX.utils.book_new()
@@ -222,7 +223,7 @@ const totalCost = computed(() => {
         </el-table-column>
         <el-table-column prop="remark" label="备注" min-width="120" align="center" show-overflow-tooltip />
         <el-table-column label="入库时间" min-width="160" align="center">
-          <template #default="{ row }">{{ row.createTime?.substring(0,16) }}</template>
+          <template #default="{ row }">{{ row.createTime ? formatDateTime(row.createTime, 'YYYY-MM-DD HH:mm') : '' }}</template>
         </el-table-column>
       </el-table>
       <div class="pager-wrapper">

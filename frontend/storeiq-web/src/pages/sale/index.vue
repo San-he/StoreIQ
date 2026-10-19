@@ -3,6 +3,7 @@
  * 销售管理 — 记录表格 + 出库弹窗 + 扫码录入 + 利润计算
  */
 import { getSaleListApi, createSaleApi, createSaleBatchApi, scanProductApi } from '@@/apis/storeiq/sales'
+import { formatDateTime } from '@@/utils/datetime'
 import { getProductAllApi } from '@@/apis/storeiq/products'
 import { getStoreMapApi } from '@@/apis/storeiq/stores'
 import { Search, Refresh, CirclePlus, Camera, Upload, Download } from '@element-plus/icons-vue'
@@ -114,7 +115,7 @@ function handleExport() {
     '利润': row.profit,
     '客户': row.customerName || '',
     '备注': row.remark || '',
-    '销售时间': row.createTime?.substring(0, 16) || ''
+    '销售时间': row.createTime ? formatDateTime(row.createTime, 'YYYY-MM-DD HH:mm') : ''
   }))
   const ws = XLSX.utils.json_to_sheet(data)
   const wb = XLSX.utils.book_new()
@@ -244,7 +245,7 @@ const estimatedProfit = computed(() => {
         </el-table-column>
         <el-table-column prop="customerName" label="客户" min-width="100" align="center" show-overflow-tooltip />
         <el-table-column label="销售时间" min-width="160" align="center">
-          <template #default="{ row }">{{ row.createTime?.substring(0,16) }}</template>
+          <template #default="{ row }">{{ row.createTime ? formatDateTime(row.createTime, 'YYYY-MM-DD HH:mm') : '' }}</template>
         </el-table-column>
       </el-table>
       <div class="pager-wrapper">
