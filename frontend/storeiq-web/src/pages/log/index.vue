@@ -3,6 +3,7 @@
  * 操作日志 — 只读表格 + 筛选
  */
 import { getLogListApi, getLogModulesApi } from '@@/apis/storeiq/logs'
+import { formatDateTime } from '@@/utils/datetime'
 import { Search, Refresh } from '@element-plus/icons-vue'
 
 defineOptions({ name: 'LogManagement' })
@@ -14,6 +15,21 @@ const actionOptions = ['CREATE', 'UPDATE', 'DELETE', 'IMPORT', 'EXPORT']
 
 const pagination = reactive({ currentPage: 1, pageSize: 15, total: 0 })
 const searchForm = reactive({ module: '', action: '' })
+
+// 后端存英文码，展示层翻译为中文；入库/出库按"模块+操作"组合显示
+const MODULE_LABELS = {
+  store: '店铺', product: '商品', category: '分类', inventory: '库存',
+  purchase: '进货', sale: '销售', supplier: '供应商', user: '用户',
+  cleanup: '数据清理', unknown: '其他'
+}
+const ACTION_LABELS = { CREATE: '新增', UPDATE: '修改', DELETE: '删除', IMPORT: '导入', EXPORT: '导出', UNKNOWN: '其他' }
+
+function moduleLabel(module) { return MODULE_LABELS[module] || module }
+function actionLabel(row) {
+  if (row.module === 'purchase' && row.action === 'CREATE') return '入库'
+  if (row.module === 'sale' && row.action === 'CREATE') return '出库'
+  return ACTION_LABELS[row.action] || row.action
+}
 
 async function loadData() {
   loading.value = true
@@ -45,12 +61,12 @@ function handleSizeChange(size) { pagination.pageSize = size; pagination.current
       <el-form :inline="true" :model="searchForm">
         <el-form-item label="操作模块">
           <el-select v-model="searchForm.module" placeholder="全部" clearable style="width:140px">
-            <el-option v-for="m in moduleOptions" :key="m" :label="m" :value="m" />
+            <el-option v-for="m in moduleOptions" :key="m" :label="moduleLabel(m)" :value="m" />
           </el-select>
         </el-form-item>
         <el-form-item label="操作类型">
           <el-select v-model="searchForm.action" placeholder="全部" clearable style="width:120px">
-            <el-option v-for="a in actionOptions" :key="a" :label="a" :value="a" />
+            <el-option v-for="a in actionOptions" :key="a" :label="ACTION_LABELS[a] || a" :value="a" />
           </el-select>
         </el-form-item>
         <el-form-item>
@@ -69,20 +85,20 @@ function handleSizeChange(size) { pagination.pageSize = size; pagination.current
         <el-table-column prop="operatorName" label="操作人" min-width="100" show-overflow-tooltip />
         <el-table-column prop="module" label="模块" min-width="100" align="center">
           <template #default="{ row }">
-            <el-tag size="small" effect="plain">{{ row.module }}</el-tag>
+            <el-tag size="small" effect="plain">{{ moduleLabel(row.module) }}</el-tag>
           </template>
         </el-table-column>
         <el-table-column label="操作" min-width="90" align="center">
           <template #default="{ row }">
             <el-tag :type="row.action === 'DELETE' ? 'danger' : row.action === 'CREATE' ? 'success' : 'warning'" size="small" effect="plain">
-              {{ row.action === 'CREATE' ? '新增' : row.action === 'UPDATE' ? '修改' : row.action === 'DELETE' ? '删除' : row.action }}
+              {{ actionLabel(row) }}
             </el-tag>
           </template>
         </el-table-column>
         <el-table-column prop="detail" label="操作详情" min-width="200" show-overflow-tooltip />
         <el-table-column prop="ipAddress" label="IP地址" min-width="130" show-overflow-tooltip />
         <el-table-column label="操作时间" min-width="170">
-          <template #default="{ row }">{{ row.createTime?.substring(0, 19) }}</template>
+          <template #default="{ row }">{{ row.createTime ? formatDateTime(row.createTime, 'YYYY-MM-DD HH:mm:ss') : '' }}</template>
         </el-table-column>
       </el-table>
       <div class="pager-wrapper">

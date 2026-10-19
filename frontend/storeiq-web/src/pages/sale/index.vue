@@ -4,6 +4,7 @@
  */
 import { getSaleListApi, createSaleApi, createSaleBatchApi, scanProductApi } from '@@/apis/storeiq/sales'
 import { formatDateTime } from '@@/utils/datetime'
+import { getInventoryListApi } from '@@/apis/storeiq/inventory'
 import { getProductAllApi } from '@@/apis/storeiq/products'
 import { getStoreMapApi } from '@@/apis/storeiq/stores'
 import { Search, Refresh, CirclePlus, Camera, Upload, Download } from '@element-plus/icons-vue'
@@ -21,6 +22,8 @@ const importFileRef = ref(null)
 const scanCode = ref('')
 const productOptions = ref([])
 const storeOptions = ref([])
+const storeInventory = ref([])   // 出库弹窗：所选店铺的库存商品（商品选项按店铺过滤）
+const inventoryLoading = ref(false)
 
 const pagination = reactive({ currentPage: 1, pageSize: 10, total: 0 })
 const searchForm = reactive({ productId: '', storeId: '' })
@@ -60,26 +63,51 @@ function handleSearch() { pagination.currentPage = 1; loadData() }
 function handleReset() { searchForm.productId = ''; searchForm.storeId = ''; handleSearch() }
 
 function handleCreate() {
-  Object.assign(formData, defaultForm()); scanCode.value = ''; dialogVisible.value = true
+  Object.assign(formData, defaultForm()); scanCode.value = ''; storeInventory.value = []; dialogVisible.value = true
 }
 
-// 扫码录入
+// 扫码录入：需先选店铺，商品必须在该店库存中且库存 > 0
 async function handleScan() {
   if (!scanCode.value.trim()) return
+  if (!formData.storeId) { ElMessage.warning('请先选择出库店铺'); return }
   try {
     const { data } = await scanProductApi(scanCode.value.trim())
+    const inv = storeInventory.value.find(x => x.productId === data.id)
+    if (!inv) { ElMessage.warning('该商品不在所选店铺库存中'); return }
+    if (Number(inv.quantity) <= 0) { ElMessage.warning(`「${inv.productName}」在所选店铺库存为 0，无法出库`); return }
     formData.productId = data.id
     formData.unitPrice = data.salePrice
-    ElMessage.success(`已识别: ${data.name}`)
+    ElMessage.success(`已识别: ${data.name}（库存 ${inv.quantity}）`)
   } catch {
     ElMessage.error('未找到该商品，请检查条码')
   }
 }
 
-// 选择商品时自动填入参考售价
+// 出库店铺变更：按店铺重新加载库存，商品下拉只展示该店商品
+async function onStoreChange(storeId) {
+  formData.productId = null
+  formData.unitPrice = null
+  storeInventory.value = []
+  if (!storeId) return
+  inventoryLoading.value = true
+  try {
+    const res = await getInventoryListApi({ pageNum: 1, pageSize: 500, param: { storeId } })
+    storeInventory.value = res.data || []
+  } catch { storeInventory.value = [] }
+  finally { inventoryLoading.value = false }
+}
+
+// 选择商品：库存为 0 时提示并回退；有库存时自动填入参考售价
 function onProductChange(id) {
-  const p = productOptions.value.find(x => x.id === id)
-  if (p && !formData.unitPrice) formData.unitPrice = p.salePrice
+  if (id == null) return
+  const inv = storeInventory.value.find(x => x.productId === id)
+  if (!inv) { ElMessage.warning('该商品不在所选店铺库存中'); formData.productId = null; return }
+  if (Number(inv.quantity) <= 0) {
+    ElMessage.warning(`「${inv.productName}」在所选店铺库存为 0，无法出库`)
+    formData.productId = null
+    return
+  }
+  if (!formData.unitPrice) formData.unitPrice = inv.salePrice
 }
 
 async function handleSubmit() {
@@ -95,7 +123,7 @@ async function handleSubmit() {
   } finally { loading.value = false }
 }
 
-function handleDialogClose() { formRef.value?.resetFields() }
+function handleDialogClose() { formRef.value?.resetFields(); storeInventory.value = [] }
 function handlePageChange(page) { pagination.currentPage = page; loadData() }
 function handleSizeChange(size) { pagination.pageSize = size; pagination.currentPage = 1; loadData() }
 
@@ -268,15 +296,16 @@ const estimatedProfit = computed(() => {
       </div>
       <el-divider style="margin:12px 0">或手动选择</el-divider>
       <el-form ref="formRef" :model="formData" :rules="formRules" label-width="100px">
-        <el-form-item label="选择商品" prop="productId">
-          <el-select v-model="formData.productId" placeholder="请选择" filterable style="width:100%"
-            @change="onProductChange">
-            <el-option v-for="p in productOptions" :key="p.id" :label="`${p.name}（¥${p.salePrice}）`" :value="p.id" />
+        <el-form-item label="出库店铺" prop="storeId">
+          <el-select v-model="formData.storeId" placeholder="请先选择出库店铺" style="width:100%" @change="onStoreChange">
+            <el-option v-for="s in storeOptions" :key="s.id" :label="s.name" :value="s.id" />
           </el-select>
         </el-form-item>
-        <el-form-item label="出库店铺" prop="storeId">
-          <el-select v-model="formData.storeId" placeholder="请选择" style="width:100%">
-            <el-option v-for="s in storeOptions" :key="s.id" :label="s.name" :value="s.id" />
+        <el-form-item label="选择商品" prop="productId">
+          <el-select v-model="formData.productId" placeholder="请先选择出库店铺" filterable
+            :loading="inventoryLoading" :disabled="!formData.storeId" style="width:100%" @change="onProductChange">
+            <el-option v-for="p in storeInventory" :key="p.productId" :value="p.productId"
+              :label="`${p.productName}（¥${p.salePrice} · 库存 ${p.quantity}）`" />
           </el-select>
         </el-form-item>
         <el-row :gutter="16">

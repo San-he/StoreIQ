@@ -4,6 +4,7 @@
  */
 import { getStoreListApi, createStoreApi, updateStoreApi, deleteStoreApi, getStoreRegionsApi } from '@@/apis/storeiq/stores'
 import MapPicker from '@@/components/MapPicker/index.vue'
+import { getUserListApi } from '@@/apis/users'
 import { useRouter } from 'vue-router'
 import { Search, Refresh, CirclePlus, Delete, Edit, View, Download } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -23,6 +24,7 @@ const isEdit = ref(false)
 const formRef = ref(null)
 const mapPickerRef = ref(null)
 const regionOptions = ref([])
+const userOptions = ref([]) // 联系人下拉：启用状态的系统用户
 const originalFormData = ref('')
 
 // 分页
@@ -74,7 +76,23 @@ async function loadRegions() {
   } catch { regionOptions.value = [] }
 }
 
-onMounted(() => { loadRegions(); loadData() })
+/** 联系人下拉数据：只加载启用状态（status=1）的系统用户 */
+async function loadUsers() {
+  try {
+    const res = await getUserListApi({ pageNum: 1, pageSize: 100, param: { status: '1' } })
+    userOptions.value = (res.data || []).map(u => ({ label: u.nickname || u.username, value: u.nickname || u.username }))
+  } catch { userOptions.value = [] }
+}
+
+/** 编辑回填时，历史联系人若已不在用户列表中，临时补一个选项避免显示为空 */
+function ensureContactOption() {
+  if (!formData.contactPerson) return
+  if (!userOptions.value.some(o => o.value === formData.contactPerson)) {
+    userOptions.value.push({ label: formData.contactPerson, value: formData.contactPerson })
+  }
+}
+
+onMounted(() => { loadRegions(); loadUsers(); loadData() })
 
 // ===== 搜索 =====
 function handleSearch() { pagination.currentPage = 1; loadData() }
@@ -93,6 +111,7 @@ function handleEdit(row) {
   isEdit.value = true
   dialogTitle.value = '编辑店铺'
   Object.assign(formData, { ...row })
+  ensureContactOption()
   originalFormData.value = JSON.stringify(formData)
   dialogVisible.value = true
 }
@@ -337,7 +356,9 @@ function handleSizeChange(size) { pagination.pageSize = size; pagination.current
         <el-row :gutter="16">
           <el-col :span="12">
             <el-form-item label="联系人" prop="contactPerson">
-              <el-input v-model="formData.contactPerson" placeholder="请输入" />
+              <el-select v-model="formData.contactPerson" placeholder="请选择" filterable clearable style="width:100%">
+                <el-option v-for="u in userOptions" :key="u.value" :label="u.label" :value="u.value" />
+              </el-select>
             </el-form-item>
           </el-col>
           <el-col :span="12">
