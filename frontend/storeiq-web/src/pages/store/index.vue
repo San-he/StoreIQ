@@ -3,6 +3,7 @@
  * 店铺管理 — 表格 + 搜索 + 增删改
  */
 import { getStoreListApi, createStoreApi, updateStoreApi, deleteStoreApi, getStoreRegionsApi } from '@@/apis/storeiq/stores'
+import MapPicker from '@@/components/MapPicker/index.vue'
 import { useRouter } from 'vue-router'
 import { Search, Refresh, CirclePlus, Delete, Edit, View, Download } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -20,6 +21,7 @@ const dialogVisible = ref(false)
 const dialogTitle = ref('新增店铺')
 const isEdit = ref(false)
 const formRef = ref(null)
+const mapPickerRef = ref(null)
 const regionOptions = ref([])
 const originalFormData = ref('')
 
@@ -108,6 +110,11 @@ function handleDelete(row) {
 async function handleSubmit() {
   const valid = await formRef.value.validate().catch(() => false)
   if (!valid) return
+  // 地图选点校验：没有经纬度的店铺不会在大屏地图上展示
+  if (formData.longitude == null || formData.latitude == null) {
+    ElMessage.warning('请在地图上选择店铺位置')
+    return
+  }
   loading.value = true
   try {
     if (isEdit.value) {
@@ -153,6 +160,11 @@ async function handleCancelClick() {
 
 function handleDialogClose() {
   formRef.value?.resetFields()
+}
+
+/** 地址搜索命中后回填地址文本（用户已手动填写则不覆盖） */
+function onAddressFound(addr) {
+  if (!formData.address) formData.address = addr
 }
 
 // ===== 导出 =====
@@ -270,6 +282,7 @@ function handleSizeChange(size) { pagination.pageSize = size; pagination.current
     width="40%"
     append-to-body="body"
     :before-close="handleBeforeClose"
+    @opened="mapPickerRef?.refresh()"
     @closed="handleDialogClose"
     >
       <el-form ref="formRef" :model="formData" :rules="formRules" label-width="100px">
@@ -302,18 +315,11 @@ function handleSizeChange(size) { pagination.pageSize = size; pagination.current
         <el-form-item label="详细地址" prop="address">
           <el-input v-model="formData.address" placeholder="请输入" />
         </el-form-item>
-        <el-row :gutter="16">
-          <el-col :span="12">
-            <el-form-item label="经度" prop="longitude">
-              <el-input-number v-model="formData.longitude" :precision="7" :step="0.01" style="width:100%" />
-            </el-form-item>
-          </el-col>
-          <el-col :span="12">
-            <el-form-item label="纬度" prop="latitude">
-              <el-input-number v-model="formData.latitude" :precision="7" :step="0.01" style="width:100%" />
-            </el-form-item>
-          </el-col>
-        </el-row>
+        <el-form-item label="店铺位置" required>
+          <MapPicker ref="mapPickerRef" v-model:longitude="formData.longitude" v-model:latitude="formData.latitude"
+            @address-found="onAddressFound" />
+          <div class="coord-display">经度：{{ formData.longitude ?? '—' }}　纬度：{{ formData.latitude ?? '—' }}</div>
+        </el-form-item>
         <el-form-item label="产权类型" prop="propertyType">
           <el-radio-group v-model="formData.propertyType">
             <el-radio value="lease">租赁</el-radio>
@@ -359,4 +365,5 @@ function handleSizeChange(size) { pagination.pageSize = size; pagination.current
 .search-wrapper { margin-bottom: 16px; :deep(.el-card__body) { padding-bottom: 2px; } }
 .toolbar-wrapper { display: flex; justify-content: space-between; margin-bottom: 16px; align-items: center; }
 .pager-wrapper { display: flex; justify-content: flex-end; margin-top: 16px; }
+.coord-display { margin-top: 4px; font-size: 12px; color: #909399; }
 </style>

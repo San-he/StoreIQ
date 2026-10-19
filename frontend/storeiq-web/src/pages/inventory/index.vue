@@ -2,7 +2,9 @@
 /**
  * 库存管理 — 只读总览表格 + 筛选 + 预警高亮
  */
-import { getInventoryListApi, getInventoryAlertsApi } from '@@/apis/storeiq/inventory'
+import { getInventoryListApi } from '@@/apis/storeiq/inventory'
+// getInventoryAlertsApi 定义在 stats.js（/stats/inventory/alerts），不在 inventory.js —— 之前从这里导入导致模块加载失败、页面进不去
+import { getInventoryAlertsApi } from '@@/apis/storeiq/stats'
 import { formatDateTime } from '@@/utils/datetime'
 import { getStoreMapApi } from '@@/apis/storeiq/stores'
 import { getCategoryListApi } from '@@/apis/storeiq/categories'
