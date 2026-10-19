@@ -117,8 +117,8 @@ public class StoreController {
     /** 地图标记（全量轻量，含销售额/利润） */
     @GetMapping("/map")
     public Result<?> map() {
-        List<Store> stores = storeMapper.selectList(
-                new LambdaQueryWrapper<Store>().eq(Store::getStatus, 1));
+        // 返回全部店铺（含停运）：大屏柱体以"流动光带/静止变暗"区分运营状态
+        List<Store> stores = storeMapper.selectList(null);
 
         if (stores.isEmpty()) return Result.success(Collections.emptyList());
 

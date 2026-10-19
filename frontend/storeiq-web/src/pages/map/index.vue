@@ -59,7 +59,7 @@
       <main class="dash-center">
         <div class="indicator-row">
           <div class="ind-card"><span class="ind-val">{{ overview.saleCount || 0 }}</span><span class="ind-lbl">交易笔数</span></div>
-          <div class="ind-card"><span class="ind-val">{{ storeList.length }}</span><span class="ind-lbl">在线店铺</span></div>
+          <div class="ind-card"><span class="ind-val">{{ onlineStoreCount }}</span><span class="ind-lbl">在线店铺</span></div>
           <div class="ind-card"><span class="ind-val danger">{{ warnStoreCount }}</span><span class="ind-lbl">库存预警</span></div>
           <div class="ind-card"><span class="ind-val">{{ totalProducts }}</span><span class="ind-lbl">在售商品</span></div>
         </div>
@@ -194,6 +194,7 @@ let lastPickClientY = -1
 let labelRenderer = null      // CSS2D 渲染器（店铺名标签 + 悬停卡片）
 const storePillarMeshes = []  // 柱体拾取盒（放大的不可见圆柱，拾取更灵敏）
 const storePillars = []       // 可视柱体（标签显隐遍历用）
+let storeFlowTexture = null   // 运营中店铺共享的流动光带纹理（停运店铺用静态纹理+变暗）
 const storeLabels = []        // 店铺名标签 CSS2DObject（卸载清理用）
 const provinceLabels = []     // 省份名标签 CSS2DObject（卸载清理用）
 // 报警动画（库存预警警示环）
@@ -267,7 +268,9 @@ const totalProducts = computed(() => overview.value?.productCount || 0)
 const monthAmount = computed(() => formatMoney(overview.value?.monthSales || 0))
 const monthProfit = computed(() => formatMoney(overview.value?.monthProfit || 0))
 // 模板内联表达式提取为 computed：原先每次模板重渲染都会重新求值
-const warnStoreCount = computed(() => storeList.value.filter((s) => s.usageRate > 85).length)
+// 在线店铺/库存预警只统计运营中的店铺（/stores/map 已改为返回含停运店铺）
+const onlineStoreCount = computed(() => storeList.value.filter((s) => Number(s.status ?? 1) === 1).length)
+const warnStoreCount = computed(() => storeList.value.filter((s) => Number(s.status ?? 1) === 1 && s.usageRate > 85).length)
 const avgPrice = computed(() => (overview.value?.saleCount ? (overview.value.monthSales || 0) / overview.value.saleCount : 0))
 function formatMoney(val) {
   const n = Number(val)
@@ -314,6 +317,7 @@ const PILLAR_HEIGHT_MAX = 6   // 利润最高店铺的柱高（柱高与利润�
 const WARNING_RISE = 4         // 警示环单次上升高度（世界单位）
 const WARNING_SCALE = 1.6      // 警示环大小（世界单位）
 const WARNING_DURATION = 1500  // 单次上升动画时长（ms，叠加随机 0~800ms 错开节奏）
+const FLOW_BAND_SPEED = 0.15   // 柱体流动光带速度（纹理周期/秒，约 6.7s 一个循环）
 
 /**
  * 将经纬度转为场景 XY 平面坐标
@@ -424,8 +428,11 @@ function initThreeScene() {
     threeControls.update()
     // 鼠标拾取：rAF 节流，每帧至多处理一次（与渲染同频）
     processPendingPick()
+    const dt = Math.min(outlineClock.getDelta(), 0.1)
     // 国界流光：流动虚线匀速行进
-    updateFlowAnimation(Math.min(outlineClock.getDelta(), 0.1))
+    updateFlowAnimation(dt)
+    // 店铺柱体流动光带：运营中柱体共享纹理，光带自下而上推进（停运柱体静止）
+    if (storeFlowTexture) storeFlowTexture.offset.y -= FLOW_BAND_SPEED * dt
     // 报警动画补间推进
     warningTweenGroup.update()
     // 使用 EffectComposer 渲染（包含 Bloom 后处理）
@@ -800,6 +807,39 @@ function createGradientTexture() {
 }
 
 /**
+ * 生成运营中店铺的"流动光带"纹理：纵向渐变 + 高光带，
+ * 渲染循环推进 offset.y 实现光带自下而上流动（RepeatWrapping 无缝循环）
+ */
+function createFlowTexture() {
+  const canvas = document.createElement('canvas')
+  canvas.width = 8
+  canvas.height = 128
+  const ctx = canvas.getContext('2d')
+  // 基底：与静态纹理一致的纵向渐变
+  const gradient = ctx.createLinearGradient(0, 0, 0, 128)
+  gradient.addColorStop(0, getCssVar('--map-three-gradient-0') || '#0b2d55')
+  gradient.addColorStop(0.3, getCssVar('--map-three-gradient-1') || '#175f9e')
+  gradient.addColorStop(0.6, getCssVar('--map-three-gradient-2') || '#3fa8e8')
+  gradient.addColorStop(0.85, getCssVar('--map-three-gradient-3') || '#3397c5')
+  gradient.addColorStop(1, getCssVar('--map-three-gradient-4') || '#5dbae4')
+  ctx.fillStyle = gradient
+  ctx.fillRect(0, 0, 8, 128)
+  // 高光带：亮白色柔和边缘（叠加混合下呈发光效果）
+  const band = ctx.createLinearGradient(0, 0, 0, 128)
+  band.addColorStop(0, 'rgba(255,255,255,0)')
+  band.addColorStop(0.45, 'rgba(255,255,255,0.45)')
+  band.addColorStop(0.5, 'rgba(255,255,255,0.8)')
+  band.addColorStop(0.55, 'rgba(255,255,255,0.45)')
+  band.addColorStop(1, 'rgba(255,255,255,0)')
+  ctx.fillStyle = band
+  ctx.fillRect(0, 0, 8, 128)
+  const tex = new THREE.CanvasTexture(canvas)
+  tex.wrapS = THREE.RepeatWrapping
+  tex.wrapT = THREE.RepeatWrapping
+  return tex
+}
+
+/**
  * 在店铺经纬度位置创建 3D 渐变柱，高度由利润/营收决定
  * 柱子立在 XY 平面上，沿 Z 轴向上伸展
  */
@@ -812,7 +852,8 @@ function loadStorePillars() {
   const validStores = storeList.value.filter(s => s.longitude && s.latitude)
   if (!validStores.length) return
 
-  const gradientTex = createGradientTexture()
+  const gradientTex = createGradientTexture() // 停运店铺：静态纹理（变暗）
+  storeFlowTexture = createFlowTexture()      // 运营中店铺：共享流动光带纹理（渲染循环推进 offset）
 
   // 计算利润范围，用于归一化柱子高度（后端 /stores/map 已返回 profit 字段）
   const revenues = validStores.map(s => Number(s.profit ?? s.totalSales ?? 0))
@@ -830,11 +871,13 @@ function loadStorePillars() {
     // CylinderGeometry 沿 Y 轴创建，需绕 X 轴旋转 -90° 使其沿 Z 轴（场景高度方向）站立
     // 半径加粗到 0.3/0.35：原 0.14 在屏幕上仅约 4-5px，渐变与发光都不可见
     const geometry = new THREE.CylinderGeometry(0.3, 0.35, height, 20)
+    // 运营状态决定外观：运营中=流动光带+正常亮度；停运=静态纹理+变暗
+    const running = Number(store.status ?? 1) === 1
     // MeshBasic 不受光照影响、永远自发光亮；叠加混合 + 半透明呈"发光光柱"效果
     const material = new THREE.MeshBasicMaterial({
-      map: gradientTex,
+      map: running ? storeFlowTexture : gradientTex,
       transparent: true,
-      opacity: PILLAR_OPACITY,
+      opacity: running ? PILLAR_OPACITY : PILLAR_OPACITY * 0.4,
       blending: THREE.AdditiveBlending,
       depthWrite: false
     })
@@ -843,7 +886,7 @@ function loadStorePillars() {
     pillar.rotation.x = -Math.PI / 2
     // 底部放在省份板块顶面（z=PLATE_DEPTH），中心点需偏移 height/2
     pillar.position.set(pos.x, pos.y, PLATE_DEPTH + height / 2)
-    pillar.userData = { storeId: store.id, storeName: store.name, revenue, height, usageRate: store.usageRate }
+    pillar.userData = { storeId: store.id, storeName: store.name, revenue, height, usageRate: store.usageRate, status: store.status, running }
 
     threeScene.add(pillar)
     storePillars.push(pillar)
@@ -912,7 +955,8 @@ function createWarningTexture() {
  */
 function loadWarningAnimations() {
   if (unmounted || !threeScene) return
-  const warnPillars = storePillars.filter((p) => Number(p.userData.usageRate) > 85)
+  // 只有运营中的店铺才做库存预警动画（停运店铺不参与运营预警）
+  const warnPillars = storePillars.filter((p) => p.userData.running && Number(p.userData.usageRate) > 85)
   if (!warnPillars.length) return
 
   const tex = createWarningTexture()
@@ -1084,7 +1128,10 @@ function showStoreTooltip(pillar, pinned = false) {
     const row2 = document.createElement('div')
     row2.className = 'sc-row'
     row2.innerHTML = `<span>库存状态</span><b class="${warn ? 'sc-warn' : 'sc-ok'}">${warn ? '库存预警' : '正常'}</b>`
-    storeTooltipEl.append(title, row1, row2)
+    const row3 = document.createElement('div')
+    row3.className = 'sc-row'
+    row3.innerHTML = `<span>营业状态</span><b class="${d.running ? 'sc-ok' : 'sc-warn'}">${d.running ? '运营中' : '已停运'}</b>`
+    storeTooltipEl.append(title, row1, row2, row3)
   }
   storeTooltipEl.classList.add('show') // 触发淡入过渡（已显示时重复添加无副作用）
   // 信息卡紧贴柱顶（柱顶上方 0.5 锚定 + CSS margin 微调）
@@ -1497,6 +1544,7 @@ onBeforeUnmount(() => {
   storeTooltip = null
   storeTooltipEl = null
   renderedTooltipKey = null
+  storeFlowTexture = null
   hoveredPillar = null
   pinnedPillar = null
   // 停止报警动画并释放纹理
