@@ -1,5 +1,5 @@
-# 构建阶段
-FROM node:18-alpine AS build
+# 构建阶段（Vite 6 要求 Node ≥ 20.19）
+FROM node:22-alpine AS build
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
