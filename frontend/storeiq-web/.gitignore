@@ -14,8 +14,7 @@ vite.config.*.timestamp*
 # Logs
 *.log
 
-# Use the pnpm
-package-lock.json
+# 使用 npm（package-lock.json 纳入仓库，Docker 构建依赖 npm ci）
 yarn.lock
 
 # Agent data
