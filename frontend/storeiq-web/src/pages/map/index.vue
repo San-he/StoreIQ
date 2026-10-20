@@ -317,7 +317,7 @@ const PILLAR_HEIGHT_MAX = 6   // 利润最高店铺的柱高（柱高与利润�
 const WARNING_RISE = 4         // 警示环单次上升高度（世界单位）
 const WARNING_SCALE = 1.6      // 警示环大小（世界单位）
 const WARNING_DURATION = 1500  // 单次上升动画时长（ms，叠加随机 0~800ms 错开节奏）
-const FLOW_BAND_SPEED = 0.15   // 柱体流动光带速度（纹理周期/秒，约 6.7s 一个循环）
+const FLOW_BAND_SPEED = 0.5    // 赛博光带流速（纹理周期/秒，约 2s 螺旋一周；调大更快更凌厉）
 
 /**
  * 将经纬度转为场景 XY 平面坐标
@@ -807,32 +807,61 @@ function createGradientTexture() {
 }
 
 /**
- * 生成运营中店铺的"流动光带"纹理：纵向渐变 + 高光带，
- * 渲染循环推进 offset.y 实现光带自下而上流动（RepeatWrapping 无缝循环）
+ * 生成运营中店铺的"赛博光带"纹理（附着柱面、青色螺旋上升）：
+ * - 基底：青→蓝纵向渐变（低调偏暗，衬托光带）
+ * - 静态纵向金属反光（不随 offset 移动，营造金属柱面质感）
+ * - 斜向亮带（全宽对角线 + wrapS/wrapT 无缝衔接）：offset.y 推进时光带环绕柱体螺旋上升，
+ *   白芯 + 青色光晕 + 后方拖影，快速锐利
  */
 function createFlowTexture() {
   const canvas = document.createElement('canvas')
-  canvas.width = 8
-  canvas.height = 128
+  canvas.width = 64
+  canvas.height = 256
   const ctx = canvas.getContext('2d')
-  // 基底：与静态纹理一致的纵向渐变
-  const gradient = ctx.createLinearGradient(0, 0, 0, 128)
-  gradient.addColorStop(0, getCssVar('--map-three-gradient-0') || '#0b2d55')
-  gradient.addColorStop(0.3, getCssVar('--map-three-gradient-1') || '#175f9e')
-  gradient.addColorStop(0.6, getCssVar('--map-three-gradient-2') || '#3fa8e8')
-  gradient.addColorStop(0.85, getCssVar('--map-three-gradient-3') || '#3397c5')
-  gradient.addColorStop(1, getCssVar('--map-three-gradient-4') || '#5dbae4')
+
+  // 1) 基底：青→蓝纵向渐变（比静态纹理更暗，突出光带）
+  const gradient = ctx.createLinearGradient(0, 0, 0, 256)
+  gradient.addColorStop(0, getCssVar('--map-three-gradient-0') || '#052342')
+  gradient.addColorStop(0.4, getCssVar('--map-three-gradient-1') || '#0a3d70')
+  gradient.addColorStop(0.75, getCssVar('--map-three-gradient-2') || '#0d5e92')
+  gradient.addColorStop(1, getCssVar('--map-three-gradient-3') || '#12a5c6')
   ctx.fillStyle = gradient
-  ctx.fillRect(0, 0, 8, 128)
-  // 高光带：亮白色柔和边缘（叠加混合下呈发光效果）
-  const band = ctx.createLinearGradient(0, 0, 0, 128)
-  band.addColorStop(0, 'rgba(255,255,255,0)')
-  band.addColorStop(0.45, 'rgba(255,255,255,0.45)')
-  band.addColorStop(0.5, 'rgba(255,255,255,0.8)')
-  band.addColorStop(0.55, 'rgba(255,255,255,0.45)')
-  band.addColorStop(1, 'rgba(255,255,255,0)')
-  ctx.fillStyle = band
-  ctx.fillRect(0, 0, 8, 128)
+  ctx.fillRect(0, 0, 64, 256)
+
+  // 2) 金属反光：静态纵向高光（不随 offset 移动）
+  const sheen = ctx.createLinearGradient(0, 0, 64, 0)
+  sheen.addColorStop(0, 'rgba(255,255,255,0)')
+  sheen.addColorStop(0.18, 'rgba(170,235,255,0.10)')
+  sheen.addColorStop(0.26, 'rgba(255,255,255,0.20)')
+  sheen.addColorStop(0.34, 'rgba(170,235,255,0.05)')
+  sheen.addColorStop(0.72, 'rgba(130,220,255,0.05)')
+  sheen.addColorStop(0.86, 'rgba(255,255,255,0.10)')
+  sheen.addColorStop(1, 'rgba(255,255,255,0)')
+  ctx.fillStyle = sheen
+  ctx.fillRect(0, 0, 64, 256)
+
+  // 3) 拖影：主光带后方的青色尾迹（向下偏移 24px，循环时从顶部无缝衔接）
+  ctx.strokeStyle = 'rgba(70,215,255,0.22)'
+  ctx.lineWidth = 6
+  ctx.beginPath()
+  ctx.moveTo(0, -24)
+  ctx.lineTo(64, 232)
+  ctx.stroke()
+
+  // 4) 主光带：外发光 → 主体 → 白色核心（同一路径三次描边）
+  ctx.beginPath()
+  ctx.moveTo(0, 0)
+  ctx.lineTo(64, 256)
+  ctx.strokeStyle = 'rgba(50,210,255,0.35)'
+  ctx.lineWidth = 10
+  ctx.stroke()
+  ctx.strokeStyle = 'rgba(110,240,255,0.9)'
+  ctx.lineWidth = 3.2
+  ctx.stroke()
+  ctx.strokeStyle = 'rgba(255,255,255,0.95)'
+  ctx.lineWidth = 1.2
+  ctx.stroke()
+
   const tex = new THREE.CanvasTexture(canvas)
   tex.wrapS = THREE.RepeatWrapping
   tex.wrapT = THREE.RepeatWrapping
