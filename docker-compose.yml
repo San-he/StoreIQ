@@ -1,0 +1,58 @@
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: storeiq-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DB_PASSWORD}
+      MYSQL_DATABASE: storeiq
+      TZ: Asia/Shanghai
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --performance-schema=OFF        # 2G 内存机型省内存（不影响业务）
+      - --innodb-buffer-pool-size=128M  # 控制缓冲池占用
+    volumes:
+      - mysql-data:/var/lib/mysql
+      # 首次启动自动执行：建库建表 + 演示数据
+      - ./sql/storeiq-init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+      - ./sql/storeiq-seed.sql:/docker-entrypoint-initdb.d/02-seed.sql:ro
+    # 注意：不对公网暴露 MySQL 端口（安全组也无需放行 3306）
+    # 本地调试如需连接，临时加一行 ports: - "3307:3306" 后 docker compose up -d
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -p$$MYSQL_ROOT_PASSWORD"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  backend:
+    build: ./backend/storeiq-api
+    container_name: storeiq-backend
+    restart: unless-stopped
+    environment:
+      DB_USERNAME: root
+      DB_PASSWORD: ${DB_PASSWORD}
+      JWT_SECRET: ${JWT_SECRET}
+      DB_URL: jdbc:mysql://mysql:3306/storeiq?useUnicode=true&characterEncoding=utf-8&serverTimezone=Asia/Shanghai
+      TZ: Asia/Shanghai
+      # 2G 内存机型：限制 JVM 堆内存，避免 OOM
+      JAVA_TOOL_OPTIONS: -Xms128m -Xmx512m -XX:MaxMetaspaceSize=160m
+    depends_on:
+      mysql:
+        condition: service_healthy
+    # 不对外暴露端口：统一由 web(nginx) 反代，前后端同源
+
+  web:
+    build:
+      context: ./frontend/storeiq-web
+      args:
+        VITE_BASE_URL: ""   # 空 = 同源请求，由 nginx 反代后端
+    container_name: storeiq-web
+    restart: unless-stopped
+    ports:
+      - "80:80"   # 生产环境；本地预览若 80 被占用，改为 "8080:80" 后访问 http://localhost:8080
+    depends_on:
+      - backend
+
+volumes:
+  mysql-data:
