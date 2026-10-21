@@ -63,9 +63,19 @@
           <div class="ind-card"><span class="ind-val danger">{{ warnStoreCount }}</span><span class="ind-lbl">库存预警</span></div>
           <div class="ind-card"><span class="ind-val">{{ totalProducts }}</span><span class="ind-lbl">在售商品</span></div>
         </div>
+        <div class="map-toolbar">
+          <span class="mt-label">显示停运店铺</span>
+          <el-switch v-model="showGhosts" size="small" />
+        </div>
         <div class="map-wrapper">
           <div v-if="!threeReady" class="map-loading"><span class="loader-ring"></span><p>地图加载中...</p></div>
           <div ref="threeContainerRef" class="three-container"></div>
+          <div class="map-legend">
+            <div class="lg-item"><span class="lg-icon lg-beam"></span>Top 3 核心营收（全息光柱）</div>
+            <div class="lg-item"><span class="lg-icon lg-ring"></span>腰部店铺（雷达波纹）</div>
+            <div class="lg-item"><span class="lg-icon lg-dot"></span>普通店铺（微光点）</div>
+            <div class="lg-item"><span class="lg-icon lg-ghost"></span>已停运店铺（幽灵片）</div>
+          </div>
         </div>
         <div class="bottom-stats">
           <div class="stat-item"><span class="stat-label">同比增长</span><span class="stat-value up">▲ 12.5%</span></div>
@@ -117,7 +127,7 @@
  * 暗蓝色科技风
  */
 defineOptions({ name: 'MapView' })
-import { ref, computed, onMounted, onBeforeUnmount, nextTick } from 'vue'
+import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { useUserStore } from '@/pinia/stores/user'
 import HeaderClock from './components/HeaderClock.vue'
@@ -141,8 +151,6 @@ import { LineGeometry } from 'three/examples/jsm/lines/LineGeometry.js'
 import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial.js'
 // CSS2D：店铺名字标签 + 悬停信息卡（DOM 覆盖层）
 import { CSS2DRenderer, CSS2DObject } from 'three/examples/jsm/renderers/CSS2DRenderer.js'
-// 报警动画补间（警示环上升淡出循环；v25 推荐 Group 而非全局 TWEEN）
-import { Group, Tween, Easing } from '@tweenjs/tween.js'
 
 const router = useRouter()
 const userStore = useUserStore()
@@ -192,20 +200,32 @@ let lastPickClientY = -1
 
 // ===== 店铺标签 / 信息卡（CSS2D）=====
 let labelRenderer = null      // CSS2D 渲染器（店铺名标签 + 悬停卡片）
-const storePillarMeshes = []  // 柱体拾取盒（放大的不可见圆柱，拾取更灵敏）
-const storePillars = []       // 可视柱体（标签显隐遍历用）
-let storeFlowTexture = null   // 运营中店铺共享的流动光带纹理（停运店铺用静态纹理+变暗）
+const activePickMeshes = []   // 运营店铺拾取盒（全息柱/脉冲圈/微光点，不可见）
+const ghostPickMeshes = []    // 停运幽灵片拾取盒
+let visiblePickMeshes = []    // 当前参与拾取的盒子（受"显示停运店铺"开关影响）
 const storeLabels = []        // 店铺名标签 CSS2DObject（卸载清理用）
 const provinceLabels = []     // 省份名标签 CSS2DObject（卸载清理用）
-// 报警动画（库存预警警示环）
-const warningTweenGroup = new Group() // 补间组：渲染循环中调用 update()
-const warningTweens = []      // 运行中的 Tween（卸载时停止）
-const warningTextures = []    // 警示环纹理（卸载时释放）
+let storeFlowTexture = null   // 运营中店铺共享的流动光带纹理（渲染循环推进 offset）
+const particleSystems = []    // 全息柱内上升粒子（{ points, speeds, baseZ, topZ }）
+const radarRings = []         // 全息柱底部雷达扫描环（{ mesh, wave }）
+const rippleWaves = []        // 腰部店铺水波纹（每店两圈错相位，{ mesh, wave }）
+const ghostGroup = new THREE.Group() // 停运幽灵片组（筛选开关整体显隐）
+const showGhosts = ref(true)  // 是否显示停运店铺
 let storeTooltip = null       // 悬停信息卡 CSS2DObject
 let storeTooltipEl = null     // 信息卡 DOM 元素
 let renderedTooltipKey = null // 信息卡已渲染内容标识（内容未变时跳过 DOM 重建）
-let hoveredPillar = null      // 当前悬停的柱体
-let pinnedPillar = null       // 双击固定显示卡片的柱体
+let hoveredStore = null       // 当前悬停的店铺数据
+let pinnedStore = null        // 双击固定显示卡片的店铺数据
+
+/** 重建可见拾取列表（停运店铺开关切换时调用） */
+function rebuildVisiblePickMeshes() {
+  visiblePickMeshes = [...activePickMeshes]
+  if (showGhosts.value) visiblePickMeshes.push(...ghostPickMeshes)
+}
+watch(showGhosts, (v) => {
+  ghostGroup.visible = v
+  rebuildVisiblePickMeshes()
+})
 
 // ===== 国界流光（最外层边界双层流光）=====
 let outlineFlowGroup = null         // 流光 Group
@@ -311,12 +331,26 @@ const BLOOM_STRENGTH = 0.4    // Bloom 发光强度：越大光晕越强（影�
 const BLOOM_RADIUS = 0.8      // Bloom 扩散半径：越大光晕越柔和
 const BLOOM_THRESHOLD = 0.5   // Bloom 亮度阈值：比它亮的像素才发光（边界线约 0.55 > 此值仍发光；柱顶已调暗到 0.34 不发光）
 const MAX_PIXEL_RATIO = 1.5   // 渲染像素比上限：2K 屏全分辨率 + Bloom 后处理开销过大；1.5 视觉差异小、GPU 负担明显降低（EffectComposer 各 RenderTarget 同步按此缩放）
-const PILLAR_OPACITY = 0.85   // 柱体透明度：调低更通透，调高更实
-const PILLAR_HEIGHT_MIN = 0.5    // 利润最低（或为 0）店铺的柱高
-const PILLAR_HEIGHT_MAX = 6   // 利润最高店铺的柱高（柱高与利润线性映射于这两者之间）
-const WARNING_RISE = 4         // 警示环单次上升高度（世界单位）
-const WARNING_SCALE = 1.6      // 警示环大小（世界单位）
-const WARNING_DURATION = 1500  // 单次上升动画时长（ms，叠加随机 0~800ms 错开节奏）
+// ===== 店铺分层视觉常量（真实坐标，形态区分层级，详见 loadStorePillars）=====
+const TIER2_START = 3          // 第 1 层（全息光柱）数量：利润排名前 3
+const TIER3_START = 8          // 第 2 层（脉冲圈）：排名 4~8；其后为第 3 层微光点
+const PILLAR_HEIGHT_MIN = 0.5  // 全息柱最低高度（利润为 0 或负数时）
+const PILLAR_HEIGHT_MAX = 6    // 全息柱最高高度（柱高与利润线性映射于两者之间）
+const BEAM_CORE_RADIUS = 0.07  // 全息柱发光内芯半径（细，控制发光面积）
+const BEAM_SHELL_RADIUS = 0.3  // 全息柱外层透明壳半径（贴螺旋光带，基底压暗不泛光）
+const BEAM_SHELL_OPACITY = 0.22
+const BEAM_PARTICLE_COUNT = 24 // 每根全息柱的上升粒子数（20~30 之间，性能考虑）
+const PARTICLE_RISE_SPEED = 2.4 // 粒子上升速度（世界单位/秒）
+const RADAR_RING_MAX = 1.1     // 雷达扫描环扩散最大半径（控制在小范围，防止 Top3 相邻时叠圈）
+const RADAR_RING_PERIOD = 2.6  // 雷达波扩散周期（秒）
+const RING_BAND_WIDTH = 0.085  // 波纹圈环带宽（加粗提升可见度）
+const RING_RADIUS_MIN = 0.38   // 波纹圈最小半径（4~8 名半径按营收映射）
+const RING_RADIUS_MAX = 1.0    // 波纹圈最大半径
+const RIPPLE_PERIOD = 3.2      // 水波纹扩散周期（秒）：从中心向外扩散一圈
+const RIPPLE_START = 0.15      // 波纹起始缩放（从中心小圈开始向外扩散）
+const CENTER_DOT_SIZE = 0.2    // 波纹中心点尺寸（颜色与波纹一致）
+const DOT_SIZE = 0.3           // 微光点尺寸（默认视角下需清晰可见）
+const GHOST_RADIUS = 0.16      // 停运幽灵片半径
 const FLOW_BAND_SPEED = 0.5    // 赛博光带流速（纹理周期/秒，约 2s 螺旋一周；调大更快更凌厉）
 
 /**
@@ -433,8 +467,30 @@ function initThreeScene() {
     updateFlowAnimation(dt)
     // 店铺柱体流动光带：运营中柱体共享纹理，光带自下而上推进（停运柱体静止）
     if (storeFlowTexture) storeFlowTexture.offset.y -= FLOW_BAND_SPEED * dt
-    // 报警动画补间推进
-    warningTweenGroup.update()
+    // 全息柱内粒子上升
+    for (const ps of particleSystems) {
+      const attr = ps.points.geometry.attributes.position
+      for (let i = 0; i < attr.count; i++) {
+        let z = attr.getZ(i) + PARTICLE_RISE_SPEED * ps.speeds[i] * dt
+        if (z > ps.topZ) z = ps.baseZ
+        attr.setZ(i, z)
+      }
+      attr.needsUpdate = true
+    }
+    // 雷达扫描环扩散
+    for (const ring of radarRings) {
+      ring.wave = (ring.wave + dt / RADAR_RING_PERIOD) % 1
+      const s = 0.4 + ring.wave * (RADAR_RING_MAX - 0.4)
+      ring.mesh.scale.set(s, s, 1)
+      ring.mesh.material.opacity = (1 - ring.wave) * 0.8
+    }
+    // 腰部店铺水波纹：从中心向外扩散（双圈错相位，店铺间错开节奏）
+    for (const w of rippleWaves) {
+      w.wave = (w.wave + dt / RIPPLE_PERIOD) % 1
+      const s = RIPPLE_START + w.wave * (1 - RIPPLE_START)
+      w.mesh.scale.set(s, s, 1)
+      w.mesh.material.opacity = (1 - w.wave) * 0.9
+    }
     // 使用 EffectComposer 渲染（包含 Bloom 后处理）
     effectComposer.render()
     // CSS2D 标签/信息卡渲染
@@ -787,22 +843,18 @@ function createTextTexture(text) {
   return tex
 }
 
-/**
- * 用 Canvas 生成纵向渐变色纹理（底暗蓝 → 顶亮青）
- */
-function createGradientTexture() {
+/** 生成径向渐变小光点纹理（全息柱内上升粒子 / 微光点 Sprite 共用） */
+function createDotTexture(innerColor = 'rgba(255,255,255,1)', outerColor = 'rgba(140,240,255,0.4)') {
   const canvas = document.createElement('canvas')
-  canvas.width = 1
-  canvas.height = 128
+  canvas.width = 32
+  canvas.height = 32
   const ctx = canvas.getContext('2d')
-  const gradient = ctx.createLinearGradient(0, 0, 0, 128)
-  gradient.addColorStop(0, getCssVar('--map-three-gradient-0') || '#0b2d55')
-  gradient.addColorStop(0.3, getCssVar('--map-three-gradient-1') || '#175f9e')
-  gradient.addColorStop(0.6, getCssVar('--map-three-gradient-2') || '#3fa8e8')
-  gradient.addColorStop(0.85, getCssVar('--map-three-gradient-3') || '#3397c5')
-  gradient.addColorStop(1, getCssVar('--map-three-gradient-4') || '#5dbae4')
-  ctx.fillStyle = gradient
-  ctx.fillRect(0, 0, 1, 128)
+  const g = ctx.createRadialGradient(16, 16, 0, 16, 16, 16)
+  g.addColorStop(0, innerColor)
+  g.addColorStop(0.35, outerColor)
+  g.addColorStop(1, 'rgba(0,0,0,0)')
+  ctx.fillStyle = g
+  ctx.fillRect(0, 0, 32, 32)
   return new THREE.CanvasTexture(canvas)
 }
 
@@ -869,8 +921,11 @@ function createFlowTexture() {
 }
 
 /**
- * 在店铺经纬度位置创建 3D 渐变柱，高度由利润/营收决定
- * 柱子立在 XY 平面上，沿 Z 轴向上伸展
+ * 店铺分层渲染（真实坐标，不做错位），形态区分层级：
+ * 第 1 层（利润 Top3）：全息光柱 = 细发光内芯 + 透明外层壳(螺旋光带) + 上升粒子 + 底部雷达扫描环
+ * 第 2 层（4~8 名）：扁平脉冲圈，半径映射营收，alpha 呼吸动画（不泛光）
+ * 第 3 层（9 名起）：微光点，低透明辅助色，融入底盘
+ * 停运店铺：幽灵片，深灰半透明贴地圆片，无任何发光（hover 高亮边框 + 停运提示）
  */
 function loadStorePillars() {
   // 加载期间已卸载：不创建任何资源（否则创建的对象会绕过卸载清理）
@@ -881,68 +936,192 @@ function loadStorePillars() {
   const validStores = storeList.value.filter(s => s.longitude && s.latitude)
   if (!validStores.length) return
 
-  const gradientTex = createGradientTexture() // 停运店铺：静态纹理（变暗）
-  storeFlowTexture = createFlowTexture()      // 运营中店铺：共享流动光带纹理（渲染循环推进 offset）
+  storeFlowTexture = createFlowTexture() // 全息柱外层壳共享纹理（渲染循环推进 offset）
+  const particleTex = createDotTexture('rgba(255,255,255,1)', 'rgba(150,240,255,0.5)')
+  const dotTex = createDotTexture('rgba(255,255,255,1)', 'rgba(255,244,214,0.35)') // 亮白核心 + 淡黄光晕
 
-  // 计算利润范围，用于归一化柱子高度（后端 /stores/map 已返回 profit 字段）
-  const revenues = validStores.map(s => Number(s.profit ?? s.totalSales ?? 0))
-  const minRevenue = Math.min(...revenues, 0)
-  const maxRevenue = Math.max(...revenues, 1)
-  const range = maxRevenue - minRevenue || 1
+  const revenueOf = (s) => Number(s.profit ?? s.totalSales ?? 0)
+  const running = validStores.filter(s => Number(s.status ?? 1) === 1)
+  const stopped = validStores.filter(s => Number(s.status ?? 1) !== 1)
+  // 按利润从大到小分档
+  const sorted = [...running].sort((a, b) => revenueOf(b) - revenueOf(a))
+  const tier1 = sorted.slice(0, TIER2_START)
+  const tier2 = sorted.slice(TIER2_START, TIER3_START)
+  const tier3 = sorted.slice(TIER3_START)
 
-  validStores.forEach((store) => {
+  const tier1Revenues = tier1.map(revenueOf)
+  const minRev = Math.min(...tier1Revenues, 0)
+  const maxRev = Math.max(...tier1Revenues, 1)
+  const heightRange = maxRev - minRev || 1
+
+  ghostGroup.name = 'stopped-store-ghosts'
+  threeScene.add(ghostGroup)
+
+  // ===== 第 1 层：全息光柱（Top 3）=====
+  tier1.forEach((store, i) => {
     const pos = lonLatToXY(store.longitude, store.latitude)
-    const revenue = Number(store.profit ?? store.totalSales ?? 0)
-    // 柱高与利润线性映射：PILLAR_HEIGHT_MIN ~ PILLAR_HEIGHT_MAX（见文件顶部常量）
-    const height = PILLAR_HEIGHT_MIN + ((revenue - minRevenue) / range) * (PILLAR_HEIGHT_MAX - PILLAR_HEIGHT_MIN)
+    const revenue = revenueOf(store)
+    const height = PILLAR_HEIGHT_MIN + ((revenue - minRev) / heightRange) * (PILLAR_HEIGHT_MAX - PILLAR_HEIGHT_MIN)
+    const warn = Number(store.usageRate) > 85
+    const baseZ = PLATE_DEPTH
+    const topZ = baseZ + height
 
-    // ---- 渐变柱体 ----
-    // CylinderGeometry 沿 Y 轴创建，需绕 X 轴旋转 -90° 使其沿 Z 轴（场景高度方向）站立
-    // 半径加粗到 0.3/0.35：原 0.14 在屏幕上仅约 4-5px，渐变与发光都不可见
-    const geometry = new THREE.CylinderGeometry(0.3, 0.35, height, 20)
-    // 运营状态决定外观：运营中=流动光带+正常亮度；停运=静态纹理+变暗
-    const running = Number(store.status ?? 1) === 1
-    // MeshBasic 不受光照影响、永远自发光亮；叠加混合 + 半透明呈"发光光柱"效果
-    const material = new THREE.MeshBasicMaterial({
-      map: running ? storeFlowTexture : gradientTex,
-      transparent: true,
-      opacity: running ? PILLAR_OPACITY : PILLAR_OPACITY * 0.4,
-      blending: THREE.AdditiveBlending,
-      depthWrite: false
-    })
-    const pillar = new THREE.Mesh(geometry, material)
-    // 绕 X 轴旋转使柱体沿 Z 轴（高度方向）竖直站立
-    pillar.rotation.x = -Math.PI / 2
-    // 底部放在省份板块顶面（z=PLATE_DEPTH），中心点需偏移 height/2
-    pillar.position.set(pos.x, pos.y, PLATE_DEPTH + height / 2)
-    pillar.userData = { storeId: store.id, storeName: store.name, revenue, height, usageRate: store.usageRate, status: store.status, running }
-
-    threeScene.add(pillar)
-    storePillars.push(pillar)
-
-    // 放大拾取盒（不可见，射线检测不检查 visible）：柱体细，直接用柱体拾取命中率低、不灵敏
-    const hitbox = new THREE.Mesh(
-      new THREE.CylinderGeometry(1.1, 1.3, height + 2, 8),
-      new THREE.MeshBasicMaterial({ visible: false })
+    // 内芯：细发光核心（预警变红）
+    const core = new THREE.Mesh(
+      new THREE.CylinderGeometry(BEAM_CORE_RADIUS, BEAM_CORE_RADIUS, height, 8),
+      new THREE.MeshBasicMaterial({ color: warn ? '#ff7a6b' : '#7ffbff', transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending, depthWrite: false })
     )
-    hitbox.rotation.x = -Math.PI / 2
-    hitbox.position.copy(pillar.position)
-    hitbox.userData.pillar = pillar
-    threeScene.add(hitbox)
-    storePillarMeshes.push(hitbox)
+    core.rotation.x = -Math.PI / 2
+    core.position.set(pos.x, pos.y, baseZ + height / 2)
+    threeScene.add(core)
 
-    // 店铺名常显标签（CSS2D，位于柱顶上方）
+    // 外层透明壳：贴螺旋光带纹理；基底压暗不触发泛光，仅光带自身发光
+    const shell = new THREE.Mesh(
+      new THREE.CylinderGeometry(BEAM_SHELL_RADIUS, BEAM_SHELL_RADIUS, height, 20),
+      new THREE.MeshBasicMaterial({ map: storeFlowTexture, transparent: true, opacity: BEAM_SHELL_OPACITY, blending: THREE.AdditiveBlending, depthWrite: false })
+    )
+    shell.rotation.x = -Math.PI / 2
+    shell.position.copy(core.position)
+    threeScene.add(shell)
+
+    // 上升粒子（每柱 20~30 个，控制性能）
+    const pCount = BEAM_PARTICLE_COUNT
+    const pPositions = new Float32Array(pCount * 3)
+    const speeds = []
+    for (let p = 0; p < pCount; p++) {
+      pPositions[p * 3] = pos.x + (Math.random() - 0.5) * (BEAM_SHELL_RADIUS * 1.2)
+      pPositions[p * 3 + 1] = pos.y + (Math.random() - 0.5) * (BEAM_SHELL_RADIUS * 1.2)
+      pPositions[p * 3 + 2] = baseZ + Math.random() * height
+      speeds.push(0.6 + Math.random() * 0.8) // 速度系数 0.6~1.4
+    }
+    const pGeo = new THREE.BufferGeometry()
+    pGeo.setAttribute('position', new THREE.BufferAttribute(pPositions, 3))
+    const points = new THREE.Points(pGeo, new THREE.PointsMaterial({
+      size: 0.11, map: particleTex, color: warn ? '#ffb0a0' : '#bffcff',
+      transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending, depthWrite: false
+    }))
+    threeScene.add(points)
+    particleSystems.push({ points, speeds, baseZ, topZ })
+
+    // 底部雷达扫描环（RingGeometry 默认即在 XY 平面平躺，勿旋转；预警变红）
+    const radar = new THREE.Mesh(
+      new THREE.RingGeometry(0.34, 0.37, 48),
+      new THREE.MeshBasicMaterial({ color: warn ? '#ff8a7a' : '#6ff4ff', transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false })
+    )
+    radar.position.set(pos.x, pos.y, baseZ + 0.08)
+    threeScene.add(radar)
+    radarRings.push({ mesh: radar, wave: i * 0.33 })
+
+    // 店铺名标签（仅第 1 层）
     if (labelRenderer) {
       const labelEl = document.createElement('div')
       labelEl.className = 'store-label'
       labelEl.textContent = store.name || ''
       const label = new CSS2DObject(labelEl)
-      label.position.set(pos.x, pos.y, PLATE_DEPTH + height + 1.6)
+      label.position.set(pos.x, pos.y, topZ + 1.4)
+      label.userData = { storeId: store.id }
       threeScene.add(label)
       storeLabels.push(label)
-      pillar.userData.label = label
     }
+
+    const d = { storeId: store.id, storeName: store.name, revenue, usageRate: store.usageRate, status: store.status, running: true, warn, kind: 'beam', x: pos.x, y: pos.y, zAnchor: topZ + 1.2 }
+    const hitbox = new THREE.Mesh(new THREE.CylinderGeometry(BEAM_SHELL_RADIUS + 0.15, BEAM_SHELL_RADIUS + 0.15, height + 2, 8), new THREE.MeshBasicMaterial({ visible: false }))
+    hitbox.rotation.x = -Math.PI / 2
+    hitbox.position.copy(core.position)
+    hitbox.userData.d = d
+    threeScene.add(hitbox)
+    activePickMeshes.push(hitbox)
   })
+
+  // ===== 第 2 层：扁平脉冲圈（4~8 名）=====
+  const ringRevs = tier2.map(revenueOf)
+  const ringMin = Math.min(...ringRevs, 0)
+  const ringMax = Math.max(...ringRevs, 1)
+  const ringRange = ringMax - ringMin || 1
+  tier2.forEach((store, i) => {
+    const pos = lonLatToXY(store.longitude, store.latitude)
+    const revenue = revenueOf(store)
+    const warn = Number(store.usageRate) > 85
+    const r = RING_RADIUS_MIN + ((revenue - ringMin) / ringRange) * (RING_RADIUS_MAX - RING_RADIUS_MIN)
+    // 水波纹：以点为中心向外扩散的两圈波纹（双圈错开半周期，店铺之间再错相位）
+    for (let k = 0; k < 2; k++) {
+      const ripple = new THREE.Mesh(
+        new THREE.RingGeometry(r - RING_BAND_WIDTH, r, 48),
+        // 叠加混合 + 亮青色：细环在 Bloom 下泛光，蓝底地图上更醒目（环面积小，无糊白风险）
+        new THREE.MeshBasicMaterial({ color: warn ? '#ff7a6b' : '#7ffbff', transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false })
+      )
+      // RingGeometry 默认即在 XY 平面平躺，勿旋转
+      ripple.position.set(pos.x, pos.y, PLATE_DEPTH + 0.06 + k * 0.02)
+      threeScene.add(ripple)
+      rippleWaves.push({ mesh: ripple, wave: k * 0.5 + (i % 5) * 0.13 })
+    }
+    // 波纹中心点：颜色与波纹一致（预警同变红）
+    const centerDot = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: dotTex, color: warn ? '#ff7a6b' : '#7ffbff', transparent: true, opacity: 0.95, blending: THREE.AdditiveBlending, depthWrite: false
+    }))
+    centerDot.scale.set(CENTER_DOT_SIZE, CENTER_DOT_SIZE, 1)
+    centerDot.position.set(pos.x, pos.y, PLATE_DEPTH + 0.14)
+    threeScene.add(centerDot)
+
+    const d = { storeId: store.id, storeName: store.name, revenue, usageRate: store.usageRate, status: store.status, running: true, warn, kind: 'ring', x: pos.x, y: pos.y, zAnchor: PLATE_DEPTH + 0.8 }
+    const hitbox = new THREE.Mesh(new THREE.CylinderGeometry(r + 0.18, r + 0.18, 1.2, 12), new THREE.MeshBasicMaterial({ visible: false }))
+    hitbox.rotation.x = -Math.PI / 2
+    hitbox.position.set(pos.x, pos.y, PLATE_DEPTH + 0.6)
+    hitbox.userData.d = d
+    threeScene.add(hitbox)
+    activePickMeshes.push(hitbox)
+  })
+
+  // ===== 第 3 层：微光点（9 名起）=====
+  tier3.forEach((store) => {
+    const pos = lonLatToXY(store.longitude, store.latitude)
+    const warn = Number(store.usageRate) > 85
+    const dot = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: dotTex, color: warn ? '#ff9a8a' : '#ffffff', transparent: true, opacity: 0.95, depthWrite: false
+    }))
+    dot.scale.set(DOT_SIZE, DOT_SIZE, 1)
+    dot.position.set(pos.x, pos.y, PLATE_DEPTH + 0.25)
+    threeScene.add(dot)
+
+    const d = { storeId: store.id, storeName: store.name, revenue: revenueOf(store), usageRate: store.usageRate, status: store.status, running: true, warn, kind: 'dot', x: pos.x, y: pos.y, zAnchor: PLATE_DEPTH + 0.9 }
+    const hitbox = new THREE.Mesh(new THREE.SphereGeometry(0.2, 8, 8), new THREE.MeshBasicMaterial({ visible: false }))
+    hitbox.position.set(pos.x, pos.y, PLATE_DEPTH + 0.25)
+    hitbox.userData.d = d
+    threeScene.add(hitbox)
+    activePickMeshes.push(hitbox)
+  })
+
+  // ===== 停运店铺：幽灵片（贴地深灰圆片，无发光）=====
+  stopped.forEach((store) => {
+    const pos = lonLatToXY(store.longitude, store.latitude)
+    const ghost = new THREE.Mesh(
+      new THREE.CircleGeometry(GHOST_RADIUS, 24),
+      new THREE.MeshBasicMaterial({ color: '#555555', transparent: true, opacity: 0.4, depthWrite: false })
+    )
+    // CircleGeometry 默认即在 XY 平面平躺，勿旋转
+    ghost.position.set(pos.x, pos.y, PLATE_DEPTH + 0.05)
+    ghostGroup.add(ghost)
+    // hover 高亮边框（默认隐藏）
+    const outline = new THREE.Mesh(
+      new THREE.RingGeometry(GHOST_RADIUS, GHOST_RADIUS + 0.035, 32),
+      new THREE.MeshBasicMaterial({ color: '#ffd166', transparent: true, opacity: 0.85, depthWrite: false, visible: false })
+    )
+    outline.position.set(pos.x, pos.y, PLATE_DEPTH + 0.07)
+    ghostGroup.add(outline)
+
+    const d = {
+      storeId: store.id, storeName: store.name, revenue: revenueOf(store), usageRate: store.usageRate,
+      status: store.status, running: false, warn: false, kind: 'ghost', x: pos.x, y: pos.y, zAnchor: PLATE_DEPTH + 0.6,
+      updateTime: store.updateTime, ghostMesh: ghost, ghostOutline: outline
+    }
+    const hitbox = new THREE.Mesh(new THREE.SphereGeometry(GHOST_RADIUS + 0.12, 8, 8), new THREE.MeshBasicMaterial({ visible: false }))
+    hitbox.position.set(pos.x, pos.y, PLATE_DEPTH + 0.2)
+    hitbox.userData.d = d
+    threeScene.add(hitbox)
+    ghostPickMeshes.push(hitbox)
+  })
+
+  rebuildVisiblePickMeshes()
 
   // 悬停信息卡（单例，内容随悬停店铺更新；外层 wrap 由 CSS2D 定位，内层做过渡动画）
   if (!storeTooltip) {
@@ -956,69 +1135,8 @@ function loadStorePillars() {
   }
 }
 
-// ===== 报警动画（库存预警店铺：警示环上升 + 淡出循环）=====
-/** 生成警示环 Canvas 纹理（红色圆环 + 感叹号） */
-function createWarningTexture() {
-  const canvas = document.createElement('canvas')
-  canvas.width = 64
-  canvas.height = 64
-  const ctx = canvas.getContext('2d')
-  ctx.strokeStyle = getCssVar('--map-three-warning-stroke') || '#ff7a7a'
-  ctx.lineWidth = 4
-  ctx.shadowColor = getCssVar('--map-three-warning-shadow') || '#ff4444'
-  ctx.shadowBlur = 10
-  ctx.beginPath()
-  ctx.arc(32, 32, 22, 0, Math.PI * 2)
-  ctx.stroke()
-  ctx.fillStyle = getCssVar('--map-three-warning-fill') || '#ffb0b0'
-  ctx.font = 'bold 30px Arial'
-  ctx.textAlign = 'center'
-  ctx.textBaseline = 'middle'
-  ctx.fillText('!', 32, 35)
-  return new THREE.CanvasTexture(canvas)
-}
-
-/**
- * 库存预警店铺（usageRate > 85）的报警动画：
- * 柱顶上方红色警示环上升 + 淡出，循环往复（@tweenjs/tween.js）
- */
-function loadWarningAnimations() {
-  if (unmounted || !threeScene) return
-  // 只有运营中的店铺才做库存预警动画（停运店铺不参与运营预警）
-  const warnPillars = storePillars.filter((p) => p.userData.running && Number(p.userData.usageRate) > 85)
-  if (!warnPillars.length) return
-
-  const tex = createWarningTexture()
-  warningTextures.push(tex)
-
-  warnPillars.forEach((pillar) => {
-    const topZ = pillar.position.z + pillar.userData.height / 2
-    const sprite = new THREE.Sprite(new THREE.SpriteMaterial({
-      map: tex,
-      transparent: true,
-      opacity: 0,
-      depthWrite: false,
-      blending: THREE.AdditiveBlending
-    }))
-    sprite.scale.set(WARNING_SCALE, WARNING_SCALE, 1)
-    sprite.position.set(pillar.position.x, pillar.position.y, topZ + 1.0)
-    threeScene.add(sprite)
-
-    // 上升 + 淡出 → 循环；repeat(Infinity) 每次重复自动回到起始值（v25 不支持在 onComplete 内重启 tween）
-    const state = { rise: 0, opacity: 1 }
-    const tween = new Tween(state, warningTweenGroup)
-      .delay(Math.random() * 1600)
-      .to({ rise: WARNING_RISE, opacity: 0 }, WARNING_DURATION + Math.random() * 800)
-      .easing(Easing.Quadratic.Out)
-      .repeat(Infinity)
-      .onUpdate(() => {
-        sprite.position.z = topZ + 1.0 + state.rise
-        sprite.material.opacity = state.opacity
-      })
-      .start()
-    warningTweens.push(tween)
-  })
-}
+// 说明：原"库存预警警示环"动画已移除——预警状态改为各层级统一变红（全息柱内芯/雷达环变红、脉冲圈红呼吸、微光点红点），
+// 由 loadStorePillars 内按 usageRate > 85 直接设置材质颜色实现，无需补间动画
 
 // ===== 省份 Hover 交互 =====
 let cachedProvinceColors = null
@@ -1072,28 +1190,31 @@ function processPendingPick() {
   // 从相机发出射线
   raycaster.setFromCamera(mouse, threeCamera)
 
-  // 优先拾取店铺柱体拾取盒（悬在板块上方），命中则显示信息卡
-  const pillarHits = raycaster.intersectObjects(storePillarMeshes, false)
-  if (pillarHits.length > 0) {
-    const pillar = pillarHits[0].object.userData.pillar
+  // 优先拾取店铺（全息柱/脉冲圈/微光点/幽灵片），命中则显示信息卡
+  const storeHits = raycaster.intersectObjects(visiblePickMeshes, false)
+  if (storeHits.length > 0) {
+    const d = storeHits[0].object.userData.d
     threeRenderer.domElement.style.cursor = 'pointer'
-    if (!pinnedPillar) {
-      // 未固定：信息卡跟随鼠标悬停的柱体
-      if (hoveredPillar !== pillar) {
-        hoveredPillar = pillar
+    if (!pinnedStore) {
+      // 未固定：信息卡跟随鼠标悬停的店铺
+      if (hoveredStore !== d) {
+        setStoreHover(hoveredStore, false)
+        hoveredStore = d
+        setStoreHover(d, true)
         updateLabelVisibility()
       }
-      showStoreTooltip(pillar, false)
+      showStoreTooltip(d, false)
     }
     resetProvinceHover()
     hoveredProvince = null
     return
   }
   threeRenderer.domElement.style.cursor = ''
-  if (!pinnedPillar) {
-    // 未固定：移开柱体即隐藏卡片
-    if (hoveredPillar) {
-      hoveredPillar = null
+  if (!pinnedStore) {
+    // 未固定：移开店铺即隐藏卡片
+    if (hoveredStore) {
+      setStoreHover(hoveredStore, false)
+      hoveredStore = null
       updateLabelVisibility()
     }
     hideStoreTooltip()
@@ -1132,15 +1253,13 @@ function buildProvincePickList() {
   provincePickMeshes = meshes
 }
 
-/** 显示店铺悬停信息卡：店名/利润/库存状态（pinned=true 时带固定标记） */
-function showStoreTooltip(pillar, pinned = false) {
+/** 显示店铺悬停信息卡（d 为店铺数据；幽灵片显示停运提示，其余显示利润/库存/营业状态） */
+function showStoreTooltip(d, pinned = false) {
   if (!storeTooltip || !storeTooltipEl) return
-  const d = pillar.userData
-  const key = `${d.storeId ?? pillar.uuid}-${pinned ? 'p' : 'h'}`
-  // 内容未变时跳过 DOM 重建：原先柱体上每次 mousemove 都清空 innerHTML 重建 3 个节点
+  const key = `${d.storeId}-${d.kind}-${pinned ? 'p' : 'h'}`
+  // 内容未变时跳过 DOM 重建
   if (key !== renderedTooltipKey) {
     renderedTooltipKey = key
-    const warn = Number(d.usageRate) > 85
     storeTooltipEl.innerHTML = ''
     const title = document.createElement('div')
     title.className = 'sc-title'
@@ -1151,20 +1270,35 @@ function showStoreTooltip(pillar, pinned = false) {
       pinBadge.textContent = '已固定'
       title.append(pinBadge)
     }
-    const row1 = document.createElement('div')
-    row1.className = 'sc-row'
-    row1.innerHTML = `<span>利润</span><b>¥${(d.revenue ?? 0).toLocaleString()}</b>`
-    const row2 = document.createElement('div')
-    row2.className = 'sc-row'
-    row2.innerHTML = `<span>库存状态</span><b class="${warn ? 'sc-warn' : 'sc-ok'}">${warn ? '库存预警' : '正常'}</b>`
-    const row3 = document.createElement('div')
-    row3.className = 'sc-row'
-    row3.innerHTML = `<span>营业状态</span><b class="${d.running ? 'sc-ok' : 'sc-warn'}">${d.running ? '运营中' : '已停运'}</b>`
-    storeTooltipEl.append(title, row1, row2, row3)
+    storeTooltipEl.append(title)
+    if (d.kind === 'ghost') {
+      const tip = document.createElement('div')
+      tip.className = 'sc-row'
+      tip.innerHTML = '<span style="color:#ffd166">该店铺已停运</span>'
+      storeTooltipEl.append(tip)
+      if (d.updateTime) {
+        const row = document.createElement('div')
+        row.className = 'sc-row'
+        row.innerHTML = `<span>停运时间</span><b>${formatDateTime(d.updateTime, 'YYYY-MM-DD HH:mm')}</b>`
+        storeTooltipEl.append(row)
+      }
+    } else {
+      const warn = d.warn
+      const row1 = document.createElement('div')
+      row1.className = 'sc-row'
+      row1.innerHTML = `<span>利润</span><b>¥${(d.revenue ?? 0).toLocaleString()}</b>`
+      const row2 = document.createElement('div')
+      row2.className = 'sc-row'
+      row2.innerHTML = `<span>库存状态</span><b class="${warn ? 'sc-warn' : 'sc-ok'}">${warn ? '库存预警' : '正常'}</b>`
+      const row3 = document.createElement('div')
+      row3.className = 'sc-row'
+      row3.innerHTML = `<span>营业状态</span><b class="${d.running ? 'sc-ok' : 'sc-warn'}">${d.running ? '运营中' : '已停运'}</b>`
+      storeTooltipEl.append(row1, row2, row3)
+    }
   }
   storeTooltipEl.classList.add('show') // 触发淡入过渡（已显示时重复添加无副作用）
-  // 信息卡紧贴柱顶（柱顶上方 0.5 锚定 + CSS margin 微调）
-  storeTooltip.position.set(pillar.position.x, pillar.position.y, pillar.position.z + d.height / 2 + 0.5)
+  // 信息卡锚定在店铺上方
+  storeTooltip.position.set(d.x, d.y, d.zAnchor)
 }
 
 /** 隐藏店铺悬停信息卡（淡出过渡） */
@@ -1172,39 +1306,49 @@ function hideStoreTooltip() {
   if (storeTooltipEl) storeTooltipEl.classList.remove('show')
 }
 
-/** 悬停/固定柱体的名字标签隐藏，其余显示 */
+/** 悬停/固定店铺的名字标签隐藏，其余显示（仅第 1 层有标签） */
 function updateLabelVisibility() {
-  storePillars.forEach((p) => {
-    const el = p.userData.label?.element
-    if (!el) return
-    el.style.display = (p === hoveredPillar || p === pinnedPillar) ? 'none' : ''
+  const hoveredId = hoveredStore?.storeId
+  const pinnedId = pinnedStore?.storeId
+  storeLabels.forEach((label) => {
+    const el = label.element
+    const sid = label.userData?.storeId
+    if (!el || sid == null) return
+    el.style.display = (sid === hoveredId || sid === pinnedId) ? 'none' : ''
   })
 }
 
-/** 双击柱体：固定/取消固定信息卡；双击空白处：取消固定 */
+/** 幽灵片 hover 高亮：显示边框 + 提亮本体 */
+function setStoreHover(d, on) {
+  if (d?.kind !== 'ghost') return
+  if (d.ghostOutline) d.ghostOutline.visible = on
+  if (d.ghostMesh) d.ghostMesh.material.opacity = on ? 0.7 : 0.4
+}
+
+/** 双击店铺：固定/取消固定信息卡；双击空白处：取消固定 */
 function onDoubleClick(event) {
   if (!threeRenderer) return
   const rect = threeRenderer.domElement.getBoundingClientRect()
   mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1
   mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1
   raycaster.setFromCamera(mouse, threeCamera)
-  const hits = raycaster.intersectObjects(storePillarMeshes, false)
+  const hits = raycaster.intersectObjects(visiblePickMeshes, false)
   if (hits.length > 0) {
-    const pillar = hits[0].object.userData.pillar
-    if (pinnedPillar === pillar) {
-      // 再次双击同一柱体：取消固定
-      pinnedPillar = null
+    const d = hits[0].object.userData.d
+    if (pinnedStore === d) {
+      // 再次双击同一店铺：取消固定
+      pinnedStore = null
       updateLabelVisibility()
       hideStoreTooltip()
     } else {
-      // 固定到该柱体
-      pinnedPillar = pillar
+      // 固定到该店铺
+      pinnedStore = d
       updateLabelVisibility()
-      showStoreTooltip(pillar, true)
+      showStoreTooltip(d, true)
     }
-  } else if (pinnedPillar) {
+  } else if (pinnedStore) {
     // 双击空白处：取消固定
-    pinnedPillar = null
+    pinnedStore = null
     updateLabelVisibility()
     hideStoreTooltip()
   }
@@ -1494,9 +1638,7 @@ onMounted(async () => {
     initCharts()
     await loadAllData()
     if (unmounted) return
-    loadStorePillars()         // 第四步：店铺利润渐变柱
-    loadWarningAnimations()    // 第五步：报警动画（库存预警警示环）
-    // TODO 后续步骤：tooltip
+    loadStorePillars()         // 第四步：店铺分层渲染（全息柱/脉冲圈/微光点/幽灵片）
     if (unmounted) return
     startAlertScroll()
   }
@@ -1562,9 +1704,14 @@ onBeforeUnmount(() => {
     labelRenderer.domElement.remove()
     labelRenderer = null
   }
-  storePillarMeshes.length = 0
-  storePillars.length = 0
+  activePickMeshes.length = 0
+  ghostPickMeshes.length = 0
+  visiblePickMeshes = []
   storeLabels.length = 0
+  particleSystems.length = 0
+  radarRings.length = 0
+  rippleWaves.length = 0
+  ghostGroup.clear()
   provincePickMeshes = null
   pendingMouseEvent = null
   canvasRect = null
@@ -1574,13 +1721,8 @@ onBeforeUnmount(() => {
   storeTooltipEl = null
   renderedTooltipKey = null
   storeFlowTexture = null
-  hoveredPillar = null
-  pinnedPillar = null
-  // 停止报警动画并释放纹理
-  warningTweens.forEach((t) => t.stop())
-  warningTweens.length = 0
-  warningTextures.forEach((t) => t.dispose())
-  warningTextures.length = 0
+  hoveredStore = null
+  pinnedStore = null
   bloomPass = null; raycaster = null; hoveredProvince = null
   // 完整释放场景 GPU 资源（省份板块/柱体/拾取盒/标签/警示环等全部几何体与材质），
   // 必须在 renderer.dispose() 之前执行，dispose 事件才会被 renderer 处理、显存才会回收
@@ -1696,8 +1838,27 @@ onBeforeUnmount(() => {
 }
 
 // Map
+.map-toolbar {
+  display: flex; align-items: center; justify-content: flex-end; gap: 8px;
+  flex-shrink: 0;
+  .mt-label { font-size: 12px; color: var(--map-text-sub); }
+}
 .map-wrapper { flex: 1; min-height: 0; position: relative; border-radius: 8px; border: 1px solid var(--map-map-border); overflow: hidden; background: var(--map-three-bg);
   .three-container { width: 100%; height: 100%; transform: translateY(-10px); }
+  // 图例（左下角浮层）
+  .map-legend {
+    position: absolute; left: 12px; bottom: 12px; z-index: 5;
+    display: flex; flex-direction: column; gap: 6px;
+    padding: 8px 12px; border-radius: 6px;
+    background: rgba(6, 20, 41, 0.55); border: 1px solid var(--map-card-border);
+    font-size: 11px; color: var(--map-text-sub); pointer-events: none;
+    .lg-item { display: flex; align-items: center; gap: 8px; }
+    .lg-icon { display: inline-block; flex-shrink: 0; }
+    .lg-beam { width: 4px; height: 14px; border-radius: 2px; background: linear-gradient(180deg, #7ffbff, #0a3d70); box-shadow: 0 0 6px rgba(110, 240, 255, 0.8); }
+    .lg-ring { width: 10px; height: 10px; border-radius: 50%; border: 2px solid #4fc8ff; background: transparent; }
+    .lg-dot { width: 7px; height: 7px; border-radius: 50%; background: #8fb8d6; opacity: 0.8; }
+    .lg-ghost { width: 9px; height: 9px; border-radius: 50%; background: #555555; opacity: 0.6; }
+  }
 }
 .map-loading { position: absolute; inset: 0; z-index: 10; display: flex; flex-direction: column; align-items: center; justify-content: center; background: var(--map-loading-bg); color: var(--map-loading-text);
   p { margin-top: 12px; font-size: 14px; }
