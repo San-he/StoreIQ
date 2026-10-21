@@ -36,8 +36,8 @@ sudo tee /etc/docker/daemon.json <<'EOF'
 EOF
 sudo systemctl daemon-reload && sudo systemctl restart docker
 
-# 3. 拉取代码
-git clone https://github.com/<你的用户名>/StoreIQ.git && cd StoreIQ
+# 3. 拉取代码（GitHub 与 Gitee 双平台同步，任选其一）
+git clone https://github.com/San-he/StoreIQ.git && cd StoreIQ
 ```
 
 ## 三、一键部署

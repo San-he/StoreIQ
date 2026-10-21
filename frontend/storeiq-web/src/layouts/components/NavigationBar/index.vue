@@ -51,7 +51,7 @@ function toggleSidebar() {
         </div>
         <template #dropdown>
           <el-dropdown-menu>
-            <a target="_blank" href="https://github.com/he-sansan/StoreIQ">
+            <a target="_blank" href="https://github.com/San-he/StoreIQ">
               <el-dropdown-item>GitHub</el-dropdown-item>
             </a>
             <a target="_blank" href="https://gitee.com/he-sansan/StoreIQ">
