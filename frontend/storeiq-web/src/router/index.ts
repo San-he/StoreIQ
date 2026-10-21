@@ -1,6 +1,6 @@
 import type { RouteRecordRaw } from "vue-router"
 import { createRouter } from "vue-router"
-import { DASHBOARD_PATH, REDIRECT_PATH, routerConfig } from "@/router/config"
+import { REDIRECT_PATH, routerConfig } from "@/router/config"
 import { registerNavigationGuard } from "@/router/guard"
 import { flatMultiLevelRoutes } from "./helper"
 
@@ -62,7 +62,8 @@ export const constantRoutes: RouteRecordRaw[] = [
   {
     path: "/",
     component: Layouts,
-    redirect: "/store/list",
+    // 默认落地页 = 3D 数据大屏首页（登录后/直接访问域名都先进大屏）
+    redirect: "/map",
     children: [
       {
         path: "home",
