@@ -59,10 +59,9 @@ public class StoreController {
             wrapper.eq(Store::getPropertyType, propertyType);
         }
         wrapper.orderByDesc(Store::getCreateTime);
+        // 未指定状态时返回全部（含停运）：删除（软删除）的店铺才能在列表中看到并可恢复启用
         if (statusObj != null && StringUtils.isNotBlank(statusObj.toString())) {
             wrapper.eq(Store::getStatus, Integer.parseInt(statusObj.toString()));
-        } else {
-            wrapper.eq(Store::getStatus, 1);
         }
 
         IPage<Store> result = storeMapper.selectPage(page, wrapper);

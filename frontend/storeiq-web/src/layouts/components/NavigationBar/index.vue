@@ -51,14 +51,11 @@ function toggleSidebar() {
         </div>
         <template #dropdown>
           <el-dropdown-menu>
-            <a target="_blank" href="https://github.com/un-pany/v3-admin-vite">
+            <a target="_blank" href="https://github.com/he-sansan/StoreIQ">
               <el-dropdown-item>GitHub</el-dropdown-item>
             </a>
-            <a target="_blank" href="https://gitee.com/un-pany/v3-admin-vite">
+            <a target="_blank" href="https://gitee.com/he-sansan/StoreIQ">
               <el-dropdown-item>Gitee</el-dropdown-item>
-            </a>
-            <a target="_blank" href="https://atomgit.com/un-pany/v3-admin-vite">
-              <el-dropdown-item>AtomGit</el-dropdown-item>
             </a>
             <el-dropdown-item divided @click="userStore.logout">
               退出登录
