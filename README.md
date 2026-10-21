@@ -83,7 +83,7 @@ npm run dev    # http://localhost:5173（已配置代理到 8002）
 ### 4. 默认账号
 | 账号 | 角色 | 说明 |
 |---|---|---|
-| superadmin /（默认密码见 `sql/storeiq-init.sql`） | 超级管理员 | **部署前务必修改** |
+| superadmin / Storeiq2026! | 超级管理员 | 演示环境公开账号（生产部署务必修改密码与环境变量） |
 
 ### 5. Docker 一键部署（推荐用于生产）
 
